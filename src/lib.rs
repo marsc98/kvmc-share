@@ -28,6 +28,8 @@ pub mod devices;
 
 pub mod noise;
 
+pub mod wire;
+
 /// Tecla usada para alternar entre "controle local" e "encaminhar para a
 /// outra máquina". Scroll Lock foi escolhida por ser praticamente inutilizada
 /// hoje em dia. Pressione e solte para alternar (não precisa segurar).
