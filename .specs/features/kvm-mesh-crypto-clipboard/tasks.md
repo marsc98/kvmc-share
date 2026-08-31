@@ -1,7 +1,7 @@
 # kvm-share — Malha Criptografada com Borda de Tela e Clipboard Sync — Tasks
 
 **Design**: `.specs/features/kvm-mesh-crypto-clipboard/design.md`
-**Status**: Draft
+**Status**: T1-T13 implementadas e commitadas; T14 (verificação manual em hardware) pendente
 
 ---
 
@@ -48,9 +48,9 @@ T12 ──→ T14 (verificação manual)
 - Skill: `find-docs` (confirmar versão estável do `snow` e sintaxe de git dependency com `rev`)
 
 **Done when**:
-- [ ] `cargo build` resolve as dependências sem erro
-- [ ] `copied-core` referenciada como `{ git = "...", rev = "<hash>" }`, não path dependency
-- [ ] Gate check passa: `cargo build`
+- [x] `cargo build` resolve as dependências sem erro
+- [x] `copied-core` referenciada como `{ git = "...", rev = "<hash>" }`, não path dependency
+- [x] Gate check passa: `cargo build`
 
 **Tests**: none (mudança de manifest)
 **Gate**: build
@@ -70,12 +70,12 @@ T12 ──→ T14 (verificação manual)
 - Skill: NONE
 
 **Done when**:
-- [ ] `load()` retorna erro claro se o arquivo não existe, é malformado, ou referencia PSK inexistente
-- [ ] `Direction` cobre `left`/`right`/`up`/`down`
-- [ ] Teste unitário: parse de TOML válido com 2+ peers
-- [ ] Teste unitário: erro em TOML malformado
-- [ ] Teste unitário: erro quando `psk_path` não existe
-- [ ] Gate check passa: `cargo test`, `cargo fmt --check`, `cargo clippy -- -D warnings`
+- [x] `load()` retorna erro claro se o arquivo não existe, é malformado, ou referencia PSK inexistente
+- [x] `Direction` cobre `left`/`right`/`up`/`down`
+- [x] Teste unitário: parse de TOML válido com 2+ peers
+- [x] Teste unitário: erro em TOML malformado
+- [x] Teste unitário: erro quando `psk_path` não existe
+- [x] Gate check passa: `cargo test`, `cargo fmt --check`, `cargo clippy -- -D warnings`
 
 **Tests**: unit (inline `#[cfg(test)]`)
 **Gate**: quick
@@ -95,11 +95,11 @@ T12 ──→ T14 (verificação manual)
 - Skill: NONE
 
 **Done when**:
-- [ ] `accumulate(dx, dy)` retorna `None` enquanto dentro dos limites
-- [ ] Retorna `Some(Direction::Right)` ao cruzar a borda direita (e equivalente pras outras 3 direções)
-- [ ] Reposiciona a origem no lado oposto da tela de destino após cruzar (para consistência ao entrar na próxima tela)
-- [ ] Teste unitário por direção (4 testes) + teste de não cruzar dentro dos limites
-- [ ] Gate check passa: `cargo test`, `cargo fmt --check`, `cargo clippy -- -D warnings`
+- [x] `accumulate(dx, dy)` retorna `None` enquanto dentro dos limites
+- [x] Retorna `Some(Direction::Right)` ao cruzar a borda direita (e equivalente pras outras 3 direções)
+- [x] Reposiciona a origem no lado oposto da tela de destino após cruzar (para consistência ao entrar na próxima tela)
+- [x] Teste unitário por direção (4 testes) + teste de não cruzar dentro dos limites
+- [x] Gate check passa: `cargo test`, `cargo fmt --check`, `cargo clippy -- -D warnings`
 
 **Tests**: unit
 **Gate**: quick
@@ -119,11 +119,11 @@ T12 ──→ T14 (verificação manual)
 - Skill: NONE
 
 **Done when**:
-- [ ] `Command::GetLatestText` retorna `Response::Items`-like com texto completo do topo da pilha (não preview truncado) ou `Response::Error` se a pilha estiver vazia/topo não for texto
-- [ ] Equivalente pra imagem retorna bytes completos (reaproveitando o padrão de `GetImageBytes`)
-- [ ] Testes unitários no próprio `copied` (roundtrip serde + `handle_command`) seguindo o padrão já existente em `ipc.rs`
-- [ ] Gate check do `copied` passa: `cargo test`, `cargo fmt --check`, `cargo clippy -- -D warnings`
-- [ ] Tag/rev do commit registrada pra uso em T1
+- [x] `Command::GetLatestText` retorna `Response::Items`-like com texto completo do topo da pilha (não preview truncado) ou `Response::Error` se a pilha estiver vazia/topo não for texto
+- [x] Equivalente pra imagem retorna bytes completos (reaproveitando o padrão de `GetImageBytes`)
+- [x] Testes unitários no próprio `copied` (roundtrip serde + `handle_command`) seguindo o padrão já existente em `ipc.rs`
+- [x] Gate check do `copied` passa: `cargo test`, `cargo fmt --check`, `cargo clippy -- -D warnings`
+- [x] Tag/rev do commit registrada pra uso em T1
 
 **Tests**: unit (no repo `copied`)
 **Gate**: quick (gate do projeto `copied`, não do `kvm-share`)
@@ -145,11 +145,11 @@ T12 ──→ T14 (verificação manual)
 - Skill: `find-docs` (revalidar API do `snow` ao implementar — builder, `into_transport_mode`, tamanhos máximos de mensagem)
 
 **Done when**:
-- [ ] Handshake completo entre um par initiator/responder em memória (via `std::io::Cursor`/pipe) com a mesma PSK
-- [ ] Handshake falha quando as PSKs divergem (nenhum dado após o handshake é aceito)
-- [ ] `send`/`recv` fazem roundtrip de payload maior que um único frame Noise (testa chunking)
-- [ ] Preâmbulo de identidade permite ao respondedor escolher a PSK certa entre 2+ candidatas simuladas
-- [ ] Gate check passa: `cargo test`, `cargo fmt --check`, `cargo clippy -- -D warnings`
+- [x] Handshake completo entre um par initiator/responder em memória (via `std::io::Cursor`/pipe) com a mesma PSK
+- [x] Handshake falha quando as PSKs divergem (nenhum dado após o handshake é aceito)
+- [x] `send`/`recv` fazem roundtrip de payload maior que um único frame Noise (testa chunking)
+- [x] Preâmbulo de identidade permite ao respondedor escolher a PSK certa entre 2+ candidatas simuladas
+- [x] Gate check passa: `cargo test`, `cargo fmt --check`, `cargo clippy -- -D warnings`
 
 **Tests**: unit (handshake completo em memória, sem rede real)
 **Gate**: quick
@@ -169,10 +169,10 @@ T12 ──→ T14 (verificação manual)
 - Skill: NONE
 
 **Done when**:
-- [ ] Roundtrip de cada variante de `WireMessage` através de um par `EncryptedChannel` em memória
-- [ ] `InputEvent` serializado é byte-a-byte compatível com o `write_event`/`read_event` atual (mesmo frame de 8 bytes por dentro)
-- [ ] `ClipboardImage` com payload grande faz roundtrip correto (usa o chunking de T5)
-- [ ] Gate check passa: `cargo test`, `cargo fmt --check`, `cargo clippy -- -D warnings`
+- [x] Roundtrip de cada variante de `WireMessage` através de um par `EncryptedChannel` em memória
+- [x] `InputEvent` serializado é byte-a-byte compatível com o `write_event`/`read_event` atual (mesmo frame de 8 bytes por dentro)
+- [x] `ClipboardImage` com payload grande faz roundtrip correto (usa o chunking de T5)
+- [x] Gate check passa: `cargo test`, `cargo fmt --check`, `cargo clippy -- -D warnings`
 
 **Tests**: unit
 **Gate**: quick
@@ -192,10 +192,10 @@ T12 ──→ T14 (verificação manual)
 - Skill: NONE
 
 **Done when**:
-- [ ] `build_virtual_device()` idêntico em comportamento ao de `inject.rs` (mesmos ranges de teclas/eixos)
-- [ ] Funções de captura não dependem mais de estado global compartilhado (`Arc<AtomicBool>`) — o chamador decide quando grab/ungrab
-- [ ] Gate check passa: `cargo build`, `cargo fmt --check`, `cargo clippy -- -D warnings` (sem hardware real disponível em CI — sem teste unitário de I/O real, ver T14)
-- [ ] Comentário no módulo aponta que testes de integração real ficam em T14 (verificação manual)
+- [x] `build_virtual_device()` idêntico em comportamento ao de `inject.rs` (mesmos ranges de teclas/eixos)
+- [x] Funções de captura não dependem mais de estado global compartilhado (`Arc<AtomicBool>`) — o chamador decide quando grab/ungrab
+- [x] Gate check passa: `cargo build`, `cargo fmt --check`, `cargo clippy -- -D warnings` (sem hardware real disponível em CI — sem teste unitário de I/O real, ver T14)
+- [x] Comentário no módulo aponta que testes de integração real ficam em T14 (verificação manual)
 
 **Tests**: none (depende de hardware real — `/dev/input`, `/dev/uinput`)
 **Gate**: build
@@ -215,13 +215,13 @@ T12 ──→ T14 (verificação manual)
 - Skill: NONE
 
 **Done when**:
-- [ ] Transição `Local → Capturing` ao cruzar borda com peer configurado na direção
-- [ ] Permanece `Local` ao cruzar borda sem peer configurado naquela direção (EDGE-04)
-- [ ] `Capturing ↔ Local` via tecla de alternância, independente do estado acumulado de deltas
-- [ ] `Receiving` que detecta novo cruzamento de borda dispara relay (`Capturing` para o próximo peer) sem tocar a máquina de origem original
-- [ ] Corrida de cruzamento simultâneo resolvida deterministicamente (teste simula duas transições concorrentes)
-- [ ] Queda de conexão em `Capturing`/`Receiving` retorna pra `Local` (nunca fica "sem controle")
-- [ ] Gate check passa: `cargo test`, `cargo fmt --check`, `cargo clippy -- -D warnings`
+- [x] Transição `Local → Capturing` ao cruzar borda com peer configurado na direção
+- [x] Permanece `Local` ao cruzar borda sem peer configurado naquela direção (EDGE-04)
+- [x] `Capturing ↔ Local` via tecla de alternância, independente do estado acumulado de deltas
+- [x] `Receiving` que detecta novo cruzamento de borda dispara relay (`Capturing` para o próximo peer) sem tocar a máquina de origem original
+- [x] Corrida de cruzamento simultâneo resolvida deterministicamente (teste simula duas transições concorrentes)
+- [x] Queda de conexão em `Capturing`/`Receiving` retorna pra `Local` (nunca fica "sem controle")
+- [x] Gate check passa: `cargo test`, `cargo fmt --check`, `cargo clippy -- -D warnings`
 
 **Tests**: unit (máquina de estados isolada, com mocks de `devices`/`wire`)
 **Gate**: quick
@@ -241,10 +241,10 @@ T12 ──→ T14 (verificação manual)
 - Skill: NONE
 
 **Done when**:
-- [ ] `is_available()` retorna `false` sem erro quando o socket não existe
-- [ ] `read_latest()`/`write()` fazem roundtrip contra uma instância real de `copied-daemon` rodando em ambiente de teste (ou mock de `UnixListener` respondendo o protocolo)
-- [ ] Payload acima do limite configurado é recusado antes de enviar pela rede (log, sem panic)
-- [ ] Gate check passa: `cargo test`, `cargo fmt --check`, `cargo clippy -- -D warnings`
+- [x] `is_available()` retorna `false` sem erro quando o socket não existe
+- [x] `read_latest()`/`write()` fazem roundtrip contra uma instância real de `copied-daemon` rodando em ambiente de teste (ou mock de `UnixListener` respondendo o protocolo)
+- [x] Payload acima do limite configurado é recusado antes de enviar pela rede (log, sem panic)
+- [x] Gate check passa: `cargo test`, `cargo fmt --check`, `cargo clippy -- -D warnings`
 
 **Tests**: unit (mock de socket Unix local — não precisa do `copied` real rodando pro teste automatizado)
 **Gate**: quick
@@ -264,9 +264,9 @@ T12 ──→ T14 (verificação manual)
 - Skill: NONE
 
 **Done when**:
-- [ ] `kvm-share run` sobe sem erro com um `peers.toml` válido de exemplo
-- [ ] Conexão rejeitada (peer não listado) não derruba o processo, só loga e fecha aquela conexão (MESH-04)
-- [ ] Gate check passa: `cargo build`, `cargo fmt --check`, `cargo clippy -- -D warnings`
+- [x] `kvm-share run` sobe sem erro com um `peers.toml` válido de exemplo
+- [x] Conexão rejeitada (peer não listado) não derruba o processo, só loga e fecha aquela conexão (MESH-04)
+- [x] Gate check passa: `cargo build`, `cargo fmt --check`, `cargo clippy -- -D warnings`
 
 **Tests**: none neste binário (lógica pesada já testada nos módulos T2/T5/T6/T8/T9; este arquivo é fiação/`main`)
 **Gate**: build
@@ -286,11 +286,11 @@ T12 ──→ T14 (verificação manual)
 - Skill: NONE
 
 **Done when**:
-- [ ] Arquivo de PSK gerado tem exatamente 32 bytes e permissão `0600`
-- [ ] `scp` bem-sucedido não imprime instrução de cópia manual
-- [ ] `scp` falho imprime path local + instrução, sem tentar outro canal
-- [ ] PSK já existente pro mesmo peer pede confirmação antes de sobrescrever (edge case da spec)
-- [ ] Gate check passa: `cargo test` (função de geração/permissão testável sem rede), `cargo fmt --check`, `cargo clippy -- -D warnings`
+- [x] Arquivo de PSK gerado tem exatamente 32 bytes e permissão `0600`
+- [x] `scp` bem-sucedido não imprime instrução de cópia manual
+- [x] `scp` falho imprime path local + instrução, sem tentar outro canal
+- [x] PSK já existente pro mesmo peer pede confirmação antes de sobrescrever (edge case da spec)
+- [x] Gate check passa: `cargo test` (função de geração/permissão testável sem rede), `cargo fmt --check`, `cargo clippy -- -D warnings`
 
 **Tests**: unit (geração de PSK e permissão de arquivo; parte de rede/`scp` fica pra verificação manual em T14)
 **Gate**: quick
@@ -310,9 +310,9 @@ T12 ──→ T14 (verificação manual)
 - Skill: NONE
 
 **Done when**:
-- [ ] `cargo build` só gera o binário `kvm-share`
-- [ ] Testes de roundtrip existentes em `src/lib.rs` continuam passando (reaproveitados por `wire.rs`)
-- [ ] Gate check passa: `cargo test`, `cargo fmt --check`, `cargo clippy -- -D warnings`
+- [x] `cargo build` só gera o binário `kvm-share`
+- [x] Testes de roundtrip existentes em `src/lib.rs` continuam passando (reaproveitados por `wire.rs`)
+- [x] Gate check passa: `cargo test`, `cargo fmt --check`, `cargo clippy -- -D warnings`
 
 **Tests**: unit (os já existentes, sem regressão)
 **Gate**: quick
@@ -332,9 +332,9 @@ T12 ──→ T14 (verificação manual)
 - Skill: NONE
 
 **Done when**:
-- [ ] Seção de segurança reflete o novo modelo (Noise_XXpsk3, não mais "rode em VPN por sua conta e risco")
-- [ ] Exemplo completo de `peers.toml` pra 3 máquinas
-- [ ] Passo a passo de pareamento (`keygen`) documentado, incluindo o caso de fallback manual
+- [x] Seção de segurança reflete o novo modelo (Noise_XXpsk3, não mais "rode em VPN por sua conta e risco")
+- [x] Exemplo completo de `peers.toml` pra 3 máquinas
+- [x] Passo a passo de pareamento (`keygen`) documentado, incluindo o caso de fallback manual
 
 **Tests**: none
 **Gate**: none (documentação)
