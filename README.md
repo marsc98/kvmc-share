@@ -94,7 +94,7 @@ gerada uma vez. Na máquina `desktop`, pra parear com `laptop`:
 ./target/release/kvm-share keygen laptop 192.168.1.50
 ```
 
-Isso gera `/home/marco/.config/kvm-share/peers/laptop.psk` (permissão `0600`) e tenta
+Isso gera `~/.config/kvm-share/peers/laptop.psk` (permissão `0600`) e tenta
 `scp` esse arquivo pro mesmo path relativo em `192.168.1.50` automaticamente
 (requer SSH configurado — pode passar `usuario@host` em vez de só o IP se
 necessário). Se o `scp` falhar (sem SSH configurado, chave não aceita, etc.),
@@ -110,7 +110,7 @@ direção, então normalmente um `keygen` por par já é suficiente.
 
 ## Configuração (`peers.toml`)
 
-Crie `/home/marco/.config/kvm-share/peers.toml` em cada máquina:
+Crie `~/.config/kvm-share/peers.toml` em cada máquina:
 
 ```toml
 [local]
@@ -122,7 +122,7 @@ listen = "0.0.0.0:7532"
 [[peer]]
 name = "laptop"
 addr = "192.168.1.50:7532"
-psk_path = "/home/marco/.config/kvm-share/peers/laptop.psk"
+psk_path = "~/.config/kvm-share/peers/laptop.psk"
 direction = "right"
 ```
 
@@ -170,7 +170,7 @@ usando a PSK gerada pelo `keygen` como segredo compartilhado — isto já não �
 mais "rode em VPN por sua conta e risco": sem a PSK certa, o handshake falha
 e nenhum dado é aceito. Ainda assim:
 
-- Guarde os arquivos `.psk` (`/home/marco/.config/kvm-share/peers/*.psk`) com cuidado —
+- Guarde os arquivos `.psk` (`~/.config/kvm-share/peers/*.psk`) com cuidado —
   quem tiver a PSK de um peer pode se passar por ele.
 - O nome do peer viaja em texto claro antes do handshake (necessário pro
   respondedor escolher a PSK certa entre vários peers na mesma porta) — não é
