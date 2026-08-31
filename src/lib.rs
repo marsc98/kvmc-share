@@ -26,6 +26,8 @@ pub mod config;
 
 pub mod devices;
 
+pub mod noise;
+
 /// Tecla usada para alternar entre "controle local" e "encaminhar para a
 /// outra máquina". Scroll Lock foi escolhida por ser praticamente inutilizada
 /// hoje em dia. Pressione e solte para alternar (não precisa segurar).
@@ -64,7 +66,7 @@ pub fn read_event(stream: &mut impl Read) -> Result<Option<InputEvent>> {
 /// Como `Read::read_exact`, mas trata EOF-antes-do-primeiro-byte como fim de
 /// stream normal (retorna `Ok(false)`) em vez de erro, e qualquer EOF no meio
 /// de um frame como erro de fato (conexão caiu de forma inesperada).
-fn read_exact_or_eof(stream: &mut impl Read, buf: &mut [u8]) -> Result<bool> {
+pub(crate) fn read_exact_or_eof(stream: &mut impl Read, buf: &mut [u8]) -> Result<bool> {
     let mut read = 0;
     while read < buf.len() {
         match stream.read(&mut buf[read..]) {
