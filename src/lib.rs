@@ -16,9 +16,13 @@
 //! WireGuard/Tailscale) — o protocolo aqui não criptografa nem autentica o
 //! tráfego. Veja o README para detalhes de permissões e segurança.
 
+pub mod cursor;
+
 use anyhow::{Context, Result, bail};
 use evdev::{InputEvent, KeyCode};
 use std::io::{Read, Write};
+
+pub mod config;
 
 /// Tecla usada para alternar entre "controle local" e "encaminhar para a
 /// outra máquina". Scroll Lock foi escolhida por ser praticamente inutilizada
