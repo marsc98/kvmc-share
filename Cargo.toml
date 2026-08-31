@@ -6,3 +6,7 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.104"
 evdev = "0.13"
+snow = "0.10"
+serde = { version = "1", features = ["derive"] }
+toml = "0.9"
+copied-core = { git = "https://github.com/marsc98/copied.git", rev = "6cc778f" }
