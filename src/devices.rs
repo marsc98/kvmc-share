@@ -50,7 +50,7 @@ pub fn build_virtual_device() -> Result<VirtualDevice> {
     axes.insert(RelativeAxisCode::REL_HWHEEL);
 
     let device = VirtualDevice::builder()?
-        .name("kvm-share virtual input")
+        .name("kvmc-share virtual input")
         .with_keys(&keys)?
         .with_relative_axes(&axes)?
         .build()?;

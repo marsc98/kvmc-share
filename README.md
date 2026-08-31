@@ -1,4 +1,9 @@
-# kvm-share
+<p align="center">
+  <a href="README.md">🇧🇷 Português</a> ·
+  <a href="README.en.md">🇺🇸 English</a>
+</p>
+
+# kvmc-share
 
 Compartilhamento de mouse/teclado/clipboard entre uma malha de máquinas
 Linux, feito especificamente porque o COSMIC (compositor do Pop!_OS) ainda
@@ -15,7 +20,7 @@ eventos brutos de `/dev/input/eventX` via `evdev` na máquina de origem e os
 recria via `/dev/uinput` na máquina de destino. Isso funciona independente do
 compositor.
 
-Um único binário, `kvm-share`, roda em cada máquina da malha. Cada instância:
+Um único binário, `kvmc-share`, roda em cada máquina da malha. Cada instância:
 
 1. Abre seus dispositivos locais e cria seu dispositivo virtual `uinput` no
    boot — qualquer máquina pode virar origem ou destino de controle a
@@ -32,6 +37,41 @@ Um único binário, `kvm-share`, roda em cada máquina da malha. Cada instância
 Não existe hub/coordenador: cada máquina só sabe do vizinho imediato em cada
 direção (`left`/`right`/`up`/`down`).
 
+### Fluxo de dados dentro de uma máquina
+
+```mermaid
+flowchart LR
+    subgraph Origem["máquina em controle (origem)"]
+        EV["/dev/input/eventX\n(evdev)"] --> CAP["captura de eventos"]
+        CLIP1["clipboard local\n(via copied)"] --> CAP
+        CAP --> FSM["máquina de estados\nde foco"]
+    end
+
+    FSM -- "Noise_XXpsk3\n(ChaChaPoly + BLAKE2s)" --> NET(["TCP\npeers.toml"])
+    NET -- cifrado --> FSM2
+
+    subgraph Destino["máquina destino"]
+        FSM2["máquina de estados\nde foco"] --> UIN["/dev/uinput\n(evento recriado)"]
+        FSM2 --> CLIP2["clipboard local\n(via copied)"]
+    end
+```
+
+### Topologia da malha (exemplo de 3 máquinas)
+
+Cada máquina só conhece o vizinho imediato — sem servidor central. Cruzar a
+borda direita de `laptop` indo pra `tv` funciona mesmo sem `desktop` saber
+que `tv` existe (relay em cadeia):
+
+```mermaid
+flowchart LR
+    D["desktop\nlisten 0.0.0.0:7532"]
+    L["laptop\nlisten 0.0.0.0:7532"]
+    T["tv\nlisten 0.0.0.0:7532"]
+
+    D -- "right ⇄ left\n(Noise, PSK própria)" --> L
+    L -- "right ⇄ left\n(Noise, PSK própria)" --> T
+```
+
 ## Requisitos
 
 - Rust (`cargo`) instalado, ou compile numa máquina e copie o binário
@@ -46,7 +86,7 @@ direção (`left`/`right`/`up`/`down`).
 
 ```bash
 cargo build --release
-# gera target/release/kvm-share
+# gera target/release/kvmc-share
 ```
 
 ## Descobrindo os paths dos dispositivos
@@ -77,7 +117,7 @@ uma regra de udev pra liberar pro seu grupo:
 
 ```bash
 echo 'KERNEL=="uinput", GROUP="input", MODE="0660"' | \
-  sudo tee /etc/udev/rules.d/99-kvm-share-uinput.rules
+  sudo tee /etc/udev/rules.d/99-kvmc-share-uinput.rules
 sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
@@ -91,10 +131,10 @@ Cada par de peers precisa de uma PSK (chave pré-compartilhada de 32 bytes)
 gerada uma vez. Na máquina `desktop`, pra parear com `laptop`:
 
 ```bash
-./target/release/kvm-share keygen laptop 192.168.1.50
+./target/release/kvmc-share keygen laptop 192.168.1.50
 ```
 
-Isso gera `~/.config/kvm-share/peers/laptop.psk` (permissão `0600`) e tenta
+Isso gera `~/.config/kvmc-share/peers/laptop.psk` (permissão `0600`) e tenta
 `scp` esse arquivo pro mesmo path relativo em `192.168.1.50` automaticamente
 (requer SSH configurado — pode passar `usuario@host` em vez de só o IP se
 necessário). Se o `scp` falhar (sem SSH configurado, chave não aceita, etc.),
@@ -110,7 +150,7 @@ direção, então normalmente um `keygen` por par já é suficiente.
 
 ## Configuração (`peers.toml`)
 
-Crie `~/.config/kvm-share/peers.toml` em cada máquina:
+Crie `~/.config/kvmc-share/peers.toml` em cada máquina:
 
 ```toml
 [local]
@@ -122,7 +162,7 @@ listen = "0.0.0.0:7532"
 [[peer]]
 name = "laptop"
 addr = "192.168.1.50:7532"
-psk_path = "~/.config/kvm-share/peers/laptop.psk"
+psk_path = "~/.config/kvmc-share/peers/laptop.psk"
 direction = "right"
 ```
 
@@ -144,7 +184,7 @@ isso — declare via variável de ambiente antes de rodar (limitação conhecida
 ver abaixo):
 
 ```bash
-export KVM_SHARE_DEVICES=/dev/input/by-id/usb-SEU_TECLADO-event-kbd:/dev/input/by-id/usb-SEU_MOUSE-event-mouse
+export KVMC_SHARE_DEVICES=/dev/input/by-id/usb-SEU_TECLADO-event-kbd:/dev/input/by-id/usb-SEU_MOUSE-event-mouse
 ```
 
 ## Rodando
@@ -152,7 +192,7 @@ export KVM_SHARE_DEVICES=/dev/input/by-id/usb-SEU_TECLADO-event-kbd:/dev/input/b
 Em cada máquina da malha:
 
 ```bash
-./target/release/kvm-share run
+./target/release/kvmc-share run
 ```
 
 Não importa a ordem — cada instância escuta em `local.listen` e tenta
@@ -170,7 +210,7 @@ usando a PSK gerada pelo `keygen` como segredo compartilhado — isto já não �
 mais "rode em VPN por sua conta e risco": sem a PSK certa, o handshake falha
 e nenhum dado é aceito. Ainda assim:
 
-- Guarde os arquivos `.psk` (`~/.config/kvm-share/peers/*.psk`) com cuidado —
+- Guarde os arquivos `.psk` (`~/.config/kvmc-share/peers/*.psk`) com cuidado —
   quem tiver a PSK de um peer pode se passar por ele.
 - O nome do peer viaja em texto claro antes do handshake (necessário pro
   respondedor escolher a PSK certa entre vários peers na mesma porta) — não é
@@ -180,7 +220,7 @@ e nenhum dado é aceito. Ainda assim:
 
 ## Limitações remanescentes
 
-- **Dispositivos de captura via variável de ambiente** (`KVM_SHARE_DEVICES`),
+- **Dispositivos de captura via variável de ambiente** (`KVMC_SHARE_DEVICES`),
   não em `peers.toml` — pendente de uma versão futura de `config.rs`.
 - **Clipboard sync depende do [`copied`](https://github.com/marsc98/copied)
   rodando localmente** (socket `$XDG_RUNTIME_DIR/copied.sock`); sem ele, o
@@ -194,3 +234,7 @@ e nenhum dado é aceito. Ainda assim:
   relay em cadeia, `tcpdump` confirmando ausência de texto claro) ainda
   pendente — ver checklist de verificação manual no processo de
   desenvolvimento deste projeto.
+
+## Licença
+
+[PolyForm Noncommercial 1.0.0](LICENSE) — uso pessoal, educacional e não-comercial livre. Ver `LICENSE` pra termos completos.

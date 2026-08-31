@@ -1,10 +1,10 @@
-//! kvm-share: compartilhamento de mouse/teclado/clipboard entre uma malha de
+//! kvmc-share: compartilhamento de mouse/teclado/clipboard entre uma malha de
 //! máquinas Linux, contornando a ausência do portal
 //! `org.freedesktop.portal.InputCapture` em compositores Wayland que ainda
 //! não o implementam (ex: COSMIC/Pop!_OS).
 //!
 //! A ideia: em vez de depender de qualquer protocolo do Wayland, o daemon
-//! `kvm-share` lê eventos brutos direto de `/dev/input/eventX` (evdev) e os
+//! `kvmc-share` lê eventos brutos direto de `/dev/input/eventX` (evdev) e os
 //! recria como um dispositivo "de verdade" via `/dev/uinput` na máquina de
 //! destino. Isso funciona independente do compositor, porque atua uma camada
 //! abaixo do Wayland.

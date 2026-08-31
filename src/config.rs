@@ -1,4 +1,4 @@
-//! Parsing e validação de `~/.config/kvm-share/peers.toml`: config local da
+//! Parsing e validação de `~/.config/kvmc-share/peers.toml`: config local da
 //! máquina e lista de peers da malha (endereço, PSK, direção de tela).
 
 use anyhow::{Context, Result, bail};
@@ -86,10 +86,10 @@ fn parse_and_validate(toml_str: &str) -> Result<(LocalConfig, Vec<PeerConfig>)> 
     Ok((raw.local, peers))
 }
 
-/// Lê e valida `~/.config/kvm-share/peers.toml`.
+/// Lê e valida `~/.config/kvmc-share/peers.toml`.
 pub fn load() -> Result<(LocalConfig, Vec<PeerConfig>)> {
     let home = std::env::var("HOME").context("variável de ambiente HOME não definida")?;
-    let path = PathBuf::from(home).join(".config/kvm-share/peers.toml");
+    let path = PathBuf::from(home).join(".config/kvmc-share/peers.toml");
     let toml_str = std::fs::read_to_string(&path)
         .with_context(|| format!("falha ao ler {}", path.display()))?;
     parse_and_validate(&toml_str)
@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn parses_valid_toml_with_multiple_peers() {
-        let dir = std::env::temp_dir().join("kvm-share-test-valid");
+        let dir = std::env::temp_dir().join("kvmc-share-test-valid");
         std::fs::create_dir_all(&dir).unwrap();
         let laptop_psk = touch(&dir, "laptop.psk");
         let tablet_psk = touch(&dir, "tablet.psk");

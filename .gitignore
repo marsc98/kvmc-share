@@ -1,2 +1,10 @@
 /target
 /.cargo/config.toml
+/.specs/features
+
+# segredos/config local — nunca devem subir (PSKs e peers.toml vivem em
+# ~/.config/kvmc-share/ fora do repo, mas por segurança ignoramos também se
+# alguém gerar/copiar aqui dentro por engano)
+*.psk
+peers.toml
+.env

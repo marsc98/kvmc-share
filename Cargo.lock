@@ -372,7 +372,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "kvm-share"
+name = "kvmc-share"
 version = "0.1.0"
 dependencies = [
  "anyhow",

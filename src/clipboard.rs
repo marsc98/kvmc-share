@@ -147,7 +147,7 @@ mod tests {
     impl TestSocket {
         fn new(name: &str) -> Self {
             let path = std::env::temp_dir().join(format!(
-                "kvm-share-test-{}-{name}-{}.sock",
+                "kvmc-share-test-{}-{name}-{}.sock",
                 std::process::id(),
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)

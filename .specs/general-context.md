@@ -1,6 +1,6 @@
-# kvm-share — contexto do projeto
+# kvmc-share — contexto do projeto
 
-Este documento resume a conversa que originou o projeto `kvm-share`, pra
+Este documento resume a conversa que originou o projeto `kvmc-share`, pra
 servir de contexto pro Claude Code (ou qualquer outra ferramenta) entender o
 "porquê" por trás das decisões de arquitetura, não só o código em si.
 
@@ -71,7 +71,7 @@ precisar de nenhuma camada de compatibilidade extra.
 
 ## O que foi implementado
 
-Projeto Cargo `kvm-share` com dois binários e uma lib compartilhada:
+Projeto Cargo `kvmc-share` com dois binários e uma lib compartilhada:
 
 - **`src/lib.rs`** — protocolo de rede compartilhado: cada `InputEvent`
   evdev é serializado num frame binário fixo de 8 bytes
@@ -147,4 +147,4 @@ Projeto Cargo `kvm-share` com dois binários e uma lib compartilhada:
 ## Entregável desta sessão
 
 Código-fonte completo (`Cargo.toml`, `src/lib.rs`, `src/bin/capture.rs`,
-`src/bin/inject.rs`, `README.md`) entregue como `kvm-share.zip`.
+`src/bin/inject.rs`, `README.md`) entregue como `kvmc-share.zip`.

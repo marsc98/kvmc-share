@@ -1,4 +1,4 @@
-//! `kvm-share run`: daemon único de malha — substitui os binários separados
+//! `kvmc-share run`: daemon único de malha — substitui os binários separados
 //! `capture`/`inject` (T12 vai removê-los). Carrega `peers.toml`, conecta
 //! com cada peer via Noise (dial pro peer com nome lexicograficamente maior
 //! que o local, escuta pros demais, evitando dois lados discarem ao mesmo
@@ -8,11 +8,11 @@
 use anyhow::{Context, Result, bail};
 use evdev::uinput::VirtualDevice;
 use evdev::{EventType, InputEvent};
-use kvm_share::config::{PeerConfig, expand_home};
-use kvm_share::focus::{Focus, FocusState, LocalInjector, PeerId, PeerSender};
-use kvm_share::noise::{EncryptedChannel, handshake_as_initiator, handshake_as_responder};
-use kvm_share::wire::{self, WireMessage};
-use kvm_share::{TOGGLE_KEY, devices};
+use kvmc_share::config::{PeerConfig, expand_home};
+use kvmc_share::focus::{Focus, FocusState, LocalInjector, PeerId, PeerSender};
+use kvmc_share::noise::{EncryptedChannel, handshake_as_initiator, handshake_as_responder};
+use kvmc_share::wire::{self, WireMessage};
+use kvmc_share::{TOGGLE_KEY, devices};
 use std::collections::HashMap;
 use std::io::Read;
 use std::net::{TcpListener, TcpStream};
@@ -27,7 +27,7 @@ use std::time::Duration;
 /// não expõe esse campo, então lemos de uma variável de ambiente
 /// (`caminho1:caminho2:...`, no estilo de `PATH`) até essa lacuna ser
 /// fechada numa task futura de config.
-const DEVICE_PATHS_ENV: &str = "KVM_SHARE_DEVICES";
+const DEVICE_PATHS_ENV: &str = "KVMC_SHARE_DEVICES";
 
 const HANDSHAKE_AND_IDLE_READ_TIMEOUT: Duration = Duration::from_millis(500);
 
@@ -42,7 +42,7 @@ fn main() -> Result<()> {
         None | Some("run") => run(),
         Some("keygen") => keygen(std::env::args().skip(2).collect()),
         _ => {
-            eprintln!("uso: kvm-share [run|keygen <peer-name> <ip>]");
+            eprintln!("uso: kvmc-share [run|keygen <peer-name> <ip>]");
             std::process::exit(1);
         }
     }
@@ -67,17 +67,17 @@ fn generate_and_save_psk(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `kvm-share keygen <peer-name> <ip>`: gera a PSK compartilhada com um
+/// `kvmc-share keygen <peer-name> <ip>`: gera a PSK compartilhada com um
 /// peer e tenta distribuí-la via `scp` pro mesmo path relativo no destino.
 /// `<ip>` aceita tanto um host puro (assume que SSH config/agent resolve o
 /// usuário) quanto `user@host`, já que ambos são repassados como estão pro
 /// `scp`.
 fn keygen(args: Vec<String>) -> Result<()> {
     let [peer_name, host] = args.as_slice() else {
-        bail!("uso: kvm-share keygen <peer-name> <ip>");
+        bail!("uso: kvmc-share keygen <peer-name> <ip>");
     };
 
-    let relative_path = PathBuf::from(".config/kvm-share/peers").join(format!("{peer_name}.psk"));
+    let relative_path = PathBuf::from(".config/kvmc-share/peers").join(format!("{peer_name}.psk"));
     let path = expand_home(&Path::new("~").join(&relative_path))?;
 
     if path.exists() && !confirm_overwrite(&path)? {
@@ -100,7 +100,7 @@ fn keygen(args: Vec<String>) -> Result<()> {
             println!("não consegui copiar a PSK via scp automaticamente.");
             println!("copie manualmente com:");
             println!(
-                "  ssh {host} 'mkdir -p ~/.config/kvm-share/peers' && scp {} {remote}",
+                "  ssh {host} 'mkdir -p ~/.config/kvmc-share/peers' && scp {} {remote}",
                 path.display()
             );
         }
@@ -124,7 +124,7 @@ fn confirm_overwrite(path: &Path) -> Result<bool> {
 }
 
 fn run() -> Result<()> {
-    let (local, peers) = kvm_share::config::load()?;
+    let (local, peers) = kvmc_share::config::load()?;
     let psks: HashMap<String, [u8; 32]> = peers
         .iter()
         .map(|p| Ok((p.name.clone(), read_psk(&p.psk_path)?)))
@@ -161,7 +161,7 @@ fn run() -> Result<()> {
     let capturing = Arc::new(AtomicBool::new(false));
     spawn_capture_threads(&capturing, event_tx.clone())?;
 
-    if kvm_share::clipboard::is_available() {
+    if kvmc_share::clipboard::is_available() {
         println!("clipboard: daemon copied disponível");
     } else {
         println!("clipboard: daemon copied indisponível (integração de clipboard desativada)");
@@ -171,7 +171,7 @@ fn run() -> Result<()> {
     let sender = ChannelPeerSender(peer_senders);
     let mut focus = Focus::new(peers, local.width, local.height, injector, sender);
 
-    println!("kvm-share: '{}' escutando em {}", local.name, local.listen);
+    println!("kvmc-share: '{}' escutando em {}", local.name, local.listen);
 
     for event in event_rx {
         match event {
@@ -438,7 +438,7 @@ mod tests {
 
     #[test]
     fn generate_and_save_psk_writes_32_bytes_with_0600_permissions() {
-        let path = std::env::temp_dir().join("kvm-share-test-keygen.psk");
+        let path = std::env::temp_dir().join("kvmc-share-test-keygen.psk");
         std::fs::remove_file(&path).ok();
 
         generate_and_save_psk(&path).unwrap();

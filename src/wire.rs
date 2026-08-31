@@ -1,5 +1,5 @@
 //! Protocolo de aplicação (`WireMessage`) transportado sobre um
-//! `EncryptedChannel` (ver `kvm_share::noise`) — nunca em texto claro.
+//! `EncryptedChannel` (ver `kvmc_share::noise`) — nunca em texto claro.
 
 use crate::noise::EncryptedChannel;
 use crate::{FRAME_LEN, read_event, write_event};
