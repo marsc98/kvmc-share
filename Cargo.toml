@@ -1,0 +1,8 @@
+[package]
+name = "kvm-share"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+evdev = "0.13"
