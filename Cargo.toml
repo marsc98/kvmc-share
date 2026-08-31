@@ -10,4 +10,4 @@ snow = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.9"
-copied-core = { git = "file:///home/marco/setup/copied", rev = "49f8f96" }
+copied-core = { git = "https://github.com/marsc98/copied.git", branch = "main" }
