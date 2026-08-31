@@ -1,57 +1,55 @@
 # kvm-share
 
-Protótipo de compartilhamento de mouse/teclado entre duas máquinas Linux,
-feito especificamente porque o COSMIC (compositor do Pop!_OS) ainda não
-implementa o portal `org.freedesktop.portal.InputCapture` do Wayland — o que
-faz o Barrier, o Input Leap e o Deskflow não funcionarem nele (veja as
+Compartilhamento de mouse/teclado/clipboard entre uma malha de máquinas
+Linux, feito especificamente porque o COSMIC (compositor do Pop!_OS) ainda
+não implementa o portal `org.freedesktop.portal.InputCapture` do Wayland — o
+que faz o Barrier, o Input Leap e o Deskflow não funcionarem nele (veja as
 issues [pop-os/xdg-desktop-portal-cosmic#217](https://github.com/pop-os/xdg-desktop-portal-cosmic/issues/217)
 e [pop-os/cosmic-comp#980](https://github.com/pop-os/cosmic-comp/issues/980)).
 
 ## Como funciona
 
 Em vez de depender de qualquer protocolo do Wayland (portal, wlroots
-layer-shell, etc.), este projeto atua uma camada abaixo, direto no kernel:
+layer-shell, etc.), este projeto atua uma camada abaixo, direto no kernel: lê
+eventos brutos de `/dev/input/eventX` via `evdev` na máquina de origem e os
+recria via `/dev/uinput` na máquina de destino. Isso funciona independente do
+compositor.
 
-- **`capture`** roda na máquina onde está o mouse/teclado físico. Lê os
-  eventos brutos de `/dev/input/eventX` via `evdev`. Ao pressionar **Scroll
-  Lock**, "agarra" os dispositivos com exclusividade (`EVIOCGRAB` — a área de
-  trabalho local para de receber os eventos) e passa a encaminhar cada evento
-  pela rede.
-- **`inject`** roda na máquina que vai *receber* o controle. Recebe os
-  eventos pela rede e os recria com um dispositivo virtual criado via
-  `/dev/uinput`. Para o kernel dessa máquina, esse dispositivo é
-  indistinguível de um mouse/teclado físico — por isso funciona em qualquer
-  compositor, COSMIC incluso, já que não depende de nenhuma API do Wayland.
+Um único binário, `kvm-share`, roda em cada máquina da malha. Cada instância:
 
-Pressione Scroll Lock de novo na máquina de origem pra devolver o controle
-pra ela.
+1. Abre seus dispositivos locais e cria seu dispositivo virtual `uinput` no
+   boot — qualquer máquina pode virar origem ou destino de controle a
+   qualquer momento.
+2. Mantém uma conexão TCP persistente e autenticada (Noise Protocol) com cada
+   peer declarado em `peers.toml` (só os vizinhos imediatos — não é preciso
+   um mapa global de telas).
+3. Roteia eventos de input/clipboard através de uma máquina de estados de
+   foco: quando o cursor cruza a borda configurada (ou você aperta **Scroll
+   Lock**), a captura passa pro vizinho daquela direção; se o cursor
+   injetado nele cruzar outra borda, o controle é repassado adiante — um
+   relay em cadeia, sem servidor central.
 
-## Por que isso funciona onde o Barrier não funciona
-
-Barrier/Input Leap/Deskflow modernos usam o portal `InputCapture` do Wayland
-(via `libei`) — que é o jeito "certo" e sandboxed de fazer isso, mas depende
-do compositor implementar esse portal. GNOME 46+ e KDE Plasma 6.1+ já
-implementam; o COSMIC ainda não (issue aberta, sem PR até o momento desta
-pesquisa). Ler `/dev/input` e escrever em `/dev/uinput` diretamente contorna
-essa dependência inteiramente — é o mesmo mecanismo de baixo nível que o
-próprio Wayland usa por baixo dos panos, só que acessado diretamente.
+Não existe hub/coordenador: cada máquina só sabe do vizinho imediato em cada
+direção (`left`/`right`/`up`/`down`).
 
 ## Requisitos
 
-- Rust (`cargo`) instalado nas duas máquinas — ou compile numa e copie o
-  binário `--release` pra outra (mesma arquitetura).
-- Seu usuário precisa conseguir **ler** os dispositivos em `/dev/input/` (na
-  máquina do `capture`) e **escrever** em `/dev/uinput` (na máquina do
-  `inject`). Veja a seção de permissões abaixo.
+- Rust (`cargo`) instalado, ou compile numa máquina e copie o binário
+  `--release` pras outras (mesma arquitetura).
+- Seu usuário precisa conseguir **ler** os dispositivos em `/dev/input/` e
+  **escrever** em `/dev/uinput`. Veja a seção de permissões abaixo.
+- [`copied`](https://github.com/marsc98/copied) rodando em cada máquina, se
+  quiser sync de clipboard (opcional — o KVM funciona normalmente sem ele,
+  só sem sincronizar a área de transferência).
 
 ## Compilando
 
 ```bash
 cargo build --release
-# gera target/release/capture e target/release/inject
+# gera target/release/kvm-share
 ```
 
-## Descobrindo os paths dos dispositivos (máquina do `capture`)
+## Descobrindo os paths dos dispositivos
 
 ```bash
 # lista nome + arquivo event de cada dispositivo
@@ -65,8 +63,8 @@ Procure algo como `usb-SEU_TECLADO-event-kbd` e `usb-SEU_MOUSE-event-mouse`.
 
 ## Permissões
 
-**Leitura de `/dev/input/eventX`** (máquina do `capture`): normalmente já
-liberado pro grupo `input`. Confira se seu usuário está nele:
+**Leitura de `/dev/input/eventX`**: normalmente já liberado pro grupo
+`input`. Confira se seu usuário está nele:
 
 ```bash
 groups $USER   # deve listar "input"; se não, rode:
@@ -74,8 +72,8 @@ sudo usermod -aG input $USER
 # depois faça logout/login (ou reboot) pra valer
 ```
 
-**Escrita em `/dev/uinput`** (máquina do `inject`): geralmente é restrito a
-root por padrão. Crie uma regra de udev pra liberar pro seu grupo:
+**Escrita em `/dev/uinput`**: geralmente é restrito a root por padrão. Crie
+uma regra de udev pra liberar pro seu grupo:
 
 ```bash
 echo 'KERNEL=="uinput", GROUP="input", MODE="0660"' | \
@@ -84,75 +82,115 @@ sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
 
-Se preferir não mexer em regras de udev, rodar os binários com `sudo`
-resolve os dois lados rapidamente (menos elegante, mas funciona pra testar).
+Se preferir não mexer em regras de udev, rodar o binário com `sudo` resolve
+rapidamente (menos elegante, mas funciona pra testar).
+
+## Pareamento (`keygen`)
+
+Cada par de peers precisa de uma PSK (chave pré-compartilhada de 32 bytes)
+gerada uma vez. Na máquina `desktop`, pra parear com `laptop`:
+
+```bash
+./target/release/kvm-share keygen laptop 192.168.1.50
+```
+
+Isso gera `~/.config/kvm-share/peers/laptop.psk` (permissão `0600`) e tenta
+`scp` esse arquivo pro mesmo path relativo em `192.168.1.50` automaticamente
+(requer SSH configurado — pode passar `usuario@host` em vez de só o IP se
+necessário). Se o `scp` falhar (sem SSH configurado, chave não aceita, etc.),
+o comando imprime o path do arquivo local e a instrução de cópia manual —
+basta copiar o mesmo arquivo pro mesmo path na outra máquina por qualquer
+meio (pendrive, `rsync`, etc.). Se já existir uma PSK pra esse peer, o
+comando pede confirmação antes de sobrescrever.
+
+Repita o `keygen` do outro lado (rodando em `laptop`, apontando pra
+`desktop`) — cada máquina só precisa ter a **mesma PSK** salva localmente
+pro par em questão; o `scp` automático já cobre isso se der certo numa única
+direção, então normalmente um `keygen` por par já é suficiente.
+
+## Configuração (`peers.toml`)
+
+Crie `~/.config/kvm-share/peers.toml` em cada máquina:
+
+```toml
+[local]
+name = "desktop"
+width = 2560
+height = 1440
+listen = "0.0.0.0:7532"
+
+[[peer]]
+name = "laptop"
+addr = "192.168.1.50:7532"
+psk_path = "~/.config/kvm-share/peers/laptop.psk"
+direction = "right"
+```
+
+- `name`: identificador único desta máquina na malha (usado no handshake e
+  no desempate de corrida de foco — vence o nome lexicograficamente menor).
+- `width`/`height`: resolução usada pra decidir quando o cursor cruzou a
+  borda da tela.
+- `[[peer]]`: um bloco por vizinho imediato. `direction` é a borda por onde
+  o controle passa pra esse peer (`left`/`right`/`up`/`down`).
+
+Exemplo de malha de 3 máquinas (`desktop` — `laptop` — `tv`, da esquerda pra
+direita): `desktop` declara só `laptop` como peer `right`; `laptop` declara
+`desktop` como `left` e `tv` como `right`; `tv` declara só `laptop` como
+`left`. Cruzar a borda direita de `laptop` indo pra `tv` funciona mesmo sem
+`desktop` saber que `tv` existe — o relay em cadeia cuida disso.
+
+**Dispositivos de captura locais**: `peers.toml` ainda não tem um campo pra
+isso — declare via variável de ambiente antes de rodar (limitação conhecida,
+ver abaixo):
+
+```bash
+export KVM_SHARE_DEVICES=/dev/input/by-id/usb-SEU_TECLADO-event-kbd:/dev/input/by-id/usb-SEU_MOUSE-event-mouse
+```
 
 ## Rodando
 
-Na máquina que vai **receber** o controle (ex: seu notebook secundário),
-primeiro suba o `inject` — ele precisa estar escutando antes do `capture`
-tentar conectar:
+Em cada máquina da malha:
 
 ```bash
-./target/release/inject 0.0.0.0:7532
+./target/release/kvm-share run
 ```
 
-Na máquina de **origem** (onde está seu mouse/teclado físico agora):
+Não importa a ordem — cada instância escuta em `local.listen` e tenta
+conectar nos peers com nome lexicograficamente maior que o seu (evita duas
+pontas discando uma pra outra ao mesmo tempo).
 
-```bash
-./target/release/capture 192.168.1.50:7532 \
-  /dev/input/by-id/usb-SEU_TECLADO-event-kbd \
-  /dev/input/by-id/usb-SEU_MOUSE-event-mouse
-```
+Mova o cursor até a borda configurada, ou pressione **Scroll Lock**, pra
+alternar o controle manualmente a qualquer momento.
 
-(troque `192.168.1.50` pelo IP da máquina que está rodando o `inject`.)
+## Segurança
 
-Pressione **Scroll Lock** pra alternar o controle entre as duas máquinas.
+O tráfego entre peers é autenticado e cifrado com
+[Noise Protocol](http://noiseprotocol.org/) (`Noise_XXpsk3_25519_ChaChaPoly_BLAKE2s`),
+usando a PSK gerada pelo `keygen` como segredo compartilhado — isto já não é
+mais "rode em VPN por sua conta e risco": sem a PSK certa, o handshake falha
+e nenhum dado é aceito. Ainda assim:
 
-## Segurança — leia antes de usar
+- Guarde os arquivos `.psk` (`~/.config/kvm-share/peers/*.psk`) com cuidado —
+  quem tiver a PSK de um peer pode se passar por ele.
+- O nome do peer viaja em texto claro antes do handshake (necessário pro
+  respondedor escolher a PSK certa entre vários peers na mesma porta) — não é
+  segredo, só identifica quem está discando.
+- Evite expor a porta configurada em `listen` diretamente na internet; uma
+  VPN mesh (Tailscale/WireGuard) continua sendo uma camada extra razoável.
 
-O protocolo de rede aqui **não é criptografado nem autenticado** — é só uma
-sequência de eventos em texto binário puro. Isso é intencional pra manter o
-protótipo simples, mas significa que qualquer um na mesma rede pode ler ou
-injetar eventos na porta 7532 se ela ficar exposta. Recomendações:
+## Limitações remanescentes
 
-- Rode isso só dentro de uma rede que você controla (ex: sua LAN doméstica).
-- Melhor ainda: rode as duas pontas dentro de uma VPN mesh como
-  [Tailscale](https://tailscale.com/) ou WireGuard, e aponte o `capture` pro
-  IP da VPN da outra máquina em vez do IP da LAN. Isso te dá criptografia e
-  autenticação "de graça" sem precisar implementar nada aqui.
-- Evite expor a porta do `inject` na internet.
-
-Também vale lembrar: enquanto o `capture` está rodando, ele tem acesso bruto
-a tudo que seu teclado digita nesse dispositivo (é assim que consegue
-detectar a tecla de alternância). Isso é inerente à abordagem — só rode
-binários que você compilou/revisou você mesmo.
-
-## Limitações conhecidas deste protótipo
-
-- **Sem detecção de borda de tela**: a troca é só por tecla de atalho
-  (Scroll Lock), não por mover o cursor até a borda da tela como no
-  Barrier/Synergy. Dá pra evoluir depois, mas exigiria rastrear a posição do
-  cursor por conta própria (o evdev não te dá coordenada absoluta de mouse
-  relativo de graça).
-- **Sem clipboard compartilhado.**
-- Com múltiplos dispositivos (teclado + mouse em threads separadas), pode
-  haver um pequeno atraso entre apertar Scroll Lock e o *outro* dispositivo
-  ser efetivamente "agarrado" — na prática, imperceptível, mas vale saber que
-  existe.
-- Suporta duas máquinas (uma origem, um destino) por enquanto — nada impede
-  de rodar várias instâncias de `capture` mirando `inject`s diferentes, mas
-  não há lógica de "várias telas lado a lado" nenhuma.
-- Layout de teclado: como encaminhamos o *scancode* bruto (não o caractere
-  já traduzido), quem decide o layout final é a configuração de teclado da
-  máquina de **destino** — funciona bem se as duas máquinas usam o mesmo
-  layout; pode dar diferença se forem layouts distintos.
-
-## Ideias de evolução (se quiser continuar)
-
-- Detecção real de borda de tela (rastrear posição virtual do cursor).
-- Autenticação (token compartilhado) + criptografia (ex: usar o crate
-  `snow` pra Noise Protocol) direto no protocolo, sem depender de VPN.
-- Rodar como serviço systemd nas duas máquinas.
-- Clipboard sync.
-- Suporte a mais de duas máquinas (roteamento por qual tem o "foco").
+- **Dispositivos de captura via variável de ambiente** (`KVM_SHARE_DEVICES`),
+  não em `peers.toml` — pendente de uma versão futura de `config.rs`.
+- **Clipboard sync depende do [`copied`](https://github.com/marsc98/copied)
+  rodando localmente** (socket `$XDG_RUNTIME_DIR/copied.sock`); sem ele, o
+  KVM funciona normalmente, só sem sincronizar a área de transferência.
+  Escrita de imagem no clipboard local ainda não é suportada pelo `copied`
+  (só leitura).
+- Layout de teclado: como encaminhamos o *scancode* bruto (não o caractere já
+  traduzido), quem decide o layout final é a configuração de teclado da
+  máquina de **destino** — funciona bem se as máquinas usam o mesmo layout.
+- Validação end-to-end em hardware real (múltiplas máquinas, malha com
+  relay em cadeia, `tcpdump` confirmando ausência de texto claro) ainda
+  pendente — ver checklist de verificação manual no processo de
+  desenvolvimento deste projeto.
