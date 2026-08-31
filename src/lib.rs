@@ -1,20 +1,19 @@
-//! kvm-share: compartilhamento de mouse/teclado entre duas máquinas Linux
-//! contornando a ausência do portal `org.freedesktop.portal.InputCapture`
-//! em compositores Wayland que ainda não o implementam (ex: COSMIC/Pop!_OS).
+//! kvm-share: compartilhamento de mouse/teclado/clipboard entre uma malha de
+//! máquinas Linux, contornando a ausência do portal
+//! `org.freedesktop.portal.InputCapture` em compositores Wayland que ainda
+//! não o implementam (ex: COSMIC/Pop!_OS).
 //!
-//! A ideia: em vez de depender de qualquer protocolo do Wayland, o `capture`
-//! lê eventos brutos direto de `/dev/input/eventX` (evdev) e o `inject` os
-//! recria como um dispositivo "de verdade" via `/dev/uinput`. Isso funciona
-//! independente do compositor, porque atua uma camada abaixo do Wayland.
+//! A ideia: em vez de depender de qualquer protocolo do Wayland, o daemon
+//! `kvm-share` lê eventos brutos direto de `/dev/input/eventX` (evdev) e os
+//! recria como um dispositivo "de verdade" via `/dev/uinput` na máquina de
+//! destino. Isso funciona independente do compositor, porque atua uma camada
+//! abaixo do Wayland.
 //!
-//! Protocolo de rede: cada evento evdev vira um frame binário de 8 bytes,
-//! little-endian: `[type: u16][code: u16][value: i32]`. Sem dependências
-//! extras (serde/bincode) — é só o `input_event` do kernel sem o timestamp.
-//!
-//! IMPORTANTE: isto é um protótipo funcional, não um produto endurecido.
-//! Rode apenas em rede confiável (idealmente dentro de uma VPN como
-//! WireGuard/Tailscale) — o protocolo aqui não criptografa nem autentica o
-//! tráfego. Veja o README para detalhes de permissões e segurança.
+//! Cada evento evdev vira um frame binário de 8 bytes, little-endian:
+//! `[type: u16][code: u16][value: i32]` — esse é só o sub-encoding de
+//! `WireMessage::InputEvent` (ver `wire`); o tráfego completo entre peers é
+//! autenticado e cifrado com Noise Protocol (`Noise_XXpsk3`, ver `noise`).
+//! Veja o README para detalhes de pareamento, config e segurança.
 
 pub mod cursor;
 
