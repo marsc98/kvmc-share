@@ -145,7 +145,7 @@ dependencies = [
 [[package]]
 name = "copied-core"
 version = "0.1.0"
-source = "git+https://github.com/marsc98/copied.git?rev=6cc778f#6cc778fdb54f78b43cbbd62540664a8b9ae5cbb4"
+source = "git+file:///home/marco/setup/copied?rev=49f8f96#49f8f96228018f60cf1cbd96926b0e610c3791e7"
 dependencies = [
  "serde",
  "serde_json",
@@ -380,6 +380,7 @@ dependencies = [
  "copied-core",
  "evdev",
  "serde",
+ "serde_json",
  "snow",
  "toml",
 ]

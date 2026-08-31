@@ -18,6 +18,8 @@
 
 pub mod cursor;
 
+pub mod clipboard;
+
 use anyhow::{Context, Result, bail};
 use evdev::{InputEvent, KeyCode};
 use std::io::{Read, Write};
@@ -29,6 +31,8 @@ pub mod devices;
 pub mod noise;
 
 pub mod wire;
+
+pub mod focus;
 
 /// Tecla usada para alternar entre "controle local" e "encaminhar para a
 /// outra máquina". Scroll Lock foi escolhida por ser praticamente inutilizada
