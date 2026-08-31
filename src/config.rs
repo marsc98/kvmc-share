@@ -48,7 +48,7 @@ struct RawPeerConfig {
 
 /// Expande um `~` inicial usando a variável de ambiente `HOME`. Caminhos que
 /// não começam com `~` são retornados como estão.
-fn expand_home(path: &Path) -> Result<PathBuf> {
+pub fn expand_home(path: &Path) -> Result<PathBuf> {
     let Ok(rest) = path.strip_prefix("~") else {
         return Ok(path.to_path_buf());
     };

@@ -5,17 +5,19 @@
 //! tempo), abre os dispositivos locais e roda o loop de despacho pra
 //! `focus::Focus`.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use evdev::uinput::VirtualDevice;
 use evdev::{EventType, InputEvent};
-use kvm_share::config::PeerConfig;
+use kvm_share::config::{PeerConfig, expand_home};
 use kvm_share::focus::{Focus, FocusState, LocalInjector, PeerId, PeerSender};
 use kvm_share::noise::{EncryptedChannel, handshake_as_initiator, handshake_as_responder};
 use kvm_share::wire::{self, WireMessage};
 use kvm_share::{TOGGLE_KEY, devices};
 use std::collections::HashMap;
+use std::io::Read;
 use std::net::{TcpListener, TcpStream};
-use std::path::Path;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -38,11 +40,87 @@ enum Event {
 fn main() -> Result<()> {
     match std::env::args().nth(1).as_deref() {
         None | Some("run") => run(),
+        Some("keygen") => keygen(std::env::args().skip(2).collect()),
         _ => {
-            eprintln!("uso: kvm-share [run]");
+            eprintln!("uso: kvm-share [run|keygen <peer-name> <ip>]");
             std::process::exit(1);
         }
     }
+}
+
+/// Gera 32 bytes aleatórios de `/dev/urandom` e grava em `path` com
+/// permissão `0600`. Sem rede nem stdin, pra ser testável isoladamente.
+fn generate_and_save_psk(path: &Path) -> Result<()> {
+    let mut psk = [0u8; 32];
+    std::fs::File::open("/dev/urandom")
+        .context("falha ao abrir /dev/urandom")?
+        .read_exact(&mut psk)
+        .context("falha ao ler bytes aleatórios de /dev/urandom")?;
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("falha ao criar diretório {}", parent.display()))?;
+    }
+    std::fs::write(path, psk).with_context(|| format!("falha ao gravar {}", path.display()))?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+        .with_context(|| format!("falha ao definir permissão de {}", path.display()))?;
+    Ok(())
+}
+
+/// `kvm-share keygen <peer-name> <ip>`: gera a PSK compartilhada com um
+/// peer e tenta distribuí-la via `scp` pro mesmo path relativo no destino.
+/// `<ip>` aceita tanto um host puro (assume que SSH config/agent resolve o
+/// usuário) quanto `user@host`, já que ambos são repassados como estão pro
+/// `scp`.
+fn keygen(args: Vec<String>) -> Result<()> {
+    let [peer_name, host] = args.as_slice() else {
+        bail!("uso: kvm-share keygen <peer-name> <ip>");
+    };
+
+    let relative_path = PathBuf::from(".config/kvm-share/peers").join(format!("{peer_name}.psk"));
+    let path = expand_home(&Path::new("~").join(&relative_path))?;
+
+    if path.exists() && !confirm_overwrite(&path)? {
+        println!("cancelado, PSK existente mantida");
+        return Ok(());
+    }
+
+    generate_and_save_psk(&path)?;
+    println!("PSK gerada em {}", path.display());
+
+    let remote = format!("{host}:{}", relative_path.display());
+    let status = std::process::Command::new("scp")
+        .arg(&path)
+        .arg(&remote)
+        .status();
+
+    match status {
+        Ok(s) if s.success() => println!("PSK copiada com sucesso para {remote}"),
+        _ => {
+            println!("não consegui copiar a PSK via scp automaticamente.");
+            println!("copie manualmente com:");
+            println!(
+                "  ssh {host} 'mkdir -p ~/.config/kvm-share/peers' && scp {} {remote}",
+                path.display()
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn confirm_overwrite(path: &Path) -> Result<bool> {
+    print!(
+        "PSK já existe em {} — sobrescrever? (s/N): ",
+        path.display()
+    );
+    std::io::Write::flush(&mut std::io::stdout()).ok();
+    let mut answer = String::new();
+    std::io::stdin()
+        .read_line(&mut answer)
+        .context("falha ao ler resposta de stdin")?;
+    let answer = answer.trim().to_lowercase();
+    Ok(answer == "s" || answer == "y")
 }
 
 fn run() -> Result<()> {
@@ -351,5 +429,25 @@ fn clone_wire_message(msg: &WireMessage) -> WireMessage {
         },
         WireMessage::FocusHandoff => WireMessage::FocusHandoff,
         WireMessage::Heartbeat => WireMessage::Heartbeat,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generate_and_save_psk_writes_32_bytes_with_0600_permissions() {
+        let path = std::env::temp_dir().join("kvm-share-test-keygen.psk");
+        std::fs::remove_file(&path).ok();
+
+        generate_and_save_psk(&path).unwrap();
+
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(bytes.len(), 32);
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+
+        std::fs::remove_file(&path).ok();
     }
 }
