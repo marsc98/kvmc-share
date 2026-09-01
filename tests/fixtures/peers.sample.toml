@@ -1,0 +1,11 @@
+[local]
+name = "desktop"
+width = 2560
+height = 1440
+listen = "0.0.0.0:7532"
+
+[[peer]]
+name = "laptop"
+addr = "192.168.1.50:7532"
+psk_path = "~/.config/kvmc-share/peers/desktop--laptop.psk"
+direction = "right"
