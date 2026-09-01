@@ -630,3 +630,83 @@ EOS
 	[ "$status" -eq 1 ]
 	[[ "$output" == *"PSK near ausente"*"rode 'keygen'"* ]]
 }
+
+# --- cmd_uninstall ------------------------------------------------------
+
+@test "cmd_uninstall: sem confirmação não remove nada" {
+	run bash -c '
+		source "$1"
+		confirm() { return 1; }
+		d=$(mktemp -d)
+		UNIT="$d/kvmc-share.service"; : > "$UNIT"
+		CONF_DIR="$d/conf"; mkdir -p "$CONF_DIR"
+		PSK_DIR="$CONF_DIR/peers"
+		cmd_uninstall
+		[ -e "$UNIT" ] && echo "unit intacto"
+		[ -d "$CONF_DIR" ] && echo "conf intacto"
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"cancelado"* ]]
+	[[ "$output" == *"unit intacto"* ]]
+	[[ "$output" == *"conf intacto"* ]]
+}
+
+@test "cmd_uninstall: confirmado remove unit/conf, run_priv para udev, preserva input" {
+	run bash -c '
+		source "$1"
+		confirm() { return 0; }
+		priv_calls=""
+		run_priv() { priv_calls="$priv_calls [$*]"; }
+		systemctl() { return 0; }
+		d=$(mktemp -d)
+		UNIT="$d/kvmc-share.service"; : > "$UNIT"
+		UDEV_RULE="$d/99-kvmc-share-uinput.rules"; : > "$UDEV_RULE"
+		CONF_DIR="$d/conf"; PSK_DIR="$CONF_DIR/peers"; mkdir -p "$PSK_DIR"
+		cmd_uninstall
+		echo "priv:$priv_calls"
+		[ -e "$UNIT" ] || echo "unit removido"
+		[ -d "$CONF_DIR" ] || echo "conf removido"
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"unit removido"* ]]
+	[[ "$output" == *"conf removido"* ]]
+	[[ "$output" == *"rm -f"*"99-kvmc-share-uinput.rules"* ]]
+	[[ "$output" == *"udevadm control --reload-rules"* ]]
+	[[ "$output" == *"mantidos: usuário no grupo 'input'"* ]]
+}
+
+@test "cmd_uninstall: idempotente — segunda passada não erra" {
+	run bash -c '
+		source "$1"
+		confirm() { return 0; }
+		run_priv() { :; }
+		systemctl() { return 0; }
+		d=$(mktemp -d)
+		UNIT="$d/kvmc-share.service"
+		UDEV_RULE="$d/rule"
+		CONF_DIR="$d/conf"; PSK_DIR="$CONF_DIR/peers"
+		cmd_uninstall
+		cmd_uninstall
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"unit já ausente"* ]]
+	[[ "$output" == *"já ausente"* ]]
+}
+
+@test "cmd_uninstall: PSKs presentes disparam confirmação extra" {
+	run bash -c '
+		source "$1"
+		seen=""
+		confirm() { seen="$seen|$1"; return 0; }
+		run_priv() { :; }
+		systemctl() { return 0; }
+		d=$(mktemp -d)
+		UNIT="$d/u"; UDEV_RULE="$d/r"
+		CONF_DIR="$d/conf"; PSK_DIR="$CONF_DIR/peers"; mkdir -p "$PSK_DIR"
+		head -c 32 /dev/urandom > "$PSK_DIR/a--b.psk"
+		cmd_uninstall
+		echo "prompts:$seen"
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"apagar as chaves"* ]]
+}

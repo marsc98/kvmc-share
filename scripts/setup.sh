@@ -838,7 +838,44 @@ cmd_doctor() {
 	fi
 	return "$fail"
 }
-cmd_uninstall() { printf >&2 'uninstall: não implementado\n'; exit 1; }
+cmd_uninstall() {
+	confirm "remover unit systemd, regra udev e $CONF_DIR?" || {
+		log_info "cancelado"
+		return 0
+	}
+	if compgen -G "$PSK_DIR/*.psk" >/dev/null 2>&1; then
+		confirm "há PSKs em $PSK_DIR — apagar as chaves também?" || {
+			log_info "cancelado"
+			return 0
+		}
+	fi
+
+	if [ -e "$UNIT" ]; then
+		systemctl --user disable --now kvmc-share.service 2>/dev/null || true
+		rm -f "$UNIT"
+		systemctl --user daemon-reload 2>/dev/null || true
+		log_ok "unit removido"
+	else
+		log_info "unit já ausente"
+	fi
+
+	if [ -e "$UDEV_RULE" ]; then
+		run_priv rm -f "$UDEV_RULE"
+		run_priv udevadm control --reload-rules
+		log_ok "regra udev removida"
+	else
+		log_info "regra udev já ausente"
+	fi
+
+	if [ -e "$CONF_DIR" ]; then
+		rm -rf "$CONF_DIR"
+		log_ok "$CONF_DIR removido"
+	else
+		log_info "$CONF_DIR já ausente"
+	fi
+
+	log_warn "mantidos: usuário no grupo 'input' e enable-linger — remova à mão se quiser"
+}
 cmd_wizard() { printf >&2 'wizard: não implementado\n'; exit 1; }
 
 # --- Dispatch ---------------------------------------------------------------
