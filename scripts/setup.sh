@@ -324,7 +324,43 @@ parse_input_devices() {
 
 # --- Subcomandos (stubs — preenchidos nas próximas tasks) --------------------
 
-cmd_deps() { printf >&2 'deps: não implementado\n'; exit 1; }
+cmd_deps() {
+	local relogar=0
+
+	# --- grupo input (leitura de /dev/input/eventX) ---
+	# getent = base (vale após relogin); `id -nG` sem arg = sessão atual.
+	if getent group input | grep -qw "$USER"; then
+		log_ok "usuário no grupo 'input' (base do sistema)"
+		id -nG | grep -qw input || relogar=1
+	else
+		log_info "adicionando $USER ao grupo 'input'"
+		run_priv usermod -aG input "$USER"
+		relogar=1
+	fi
+
+	# --- regra udev p/ escrita em /dev/uinput ---
+	if [ -e "$UDEV_RULE" ] && [ "$(cat "$UDEV_RULE")" = "$UDEV_LINE" ]; then
+		log_ok "regra udev de /dev/uinput já instalada"
+	else
+		log_info "instalando regra udev em $UDEV_RULE"
+		printf '%s\n' "$UDEV_LINE" | run_priv_tee "$UDEV_RULE"
+		run_priv udevadm control --reload-rules
+		run_priv udevadm trigger
+	fi
+	if [ "$(stat -c '%a %G' /dev/uinput 2>/dev/null || true)" = "660 input" ]; then
+		log_ok "/dev/uinput gravável pelo grupo 'input'"
+	else
+		log_warn "/dev/uinput ainda não está 660 root:input — confira 'sudo modprobe uinput' e replug/reboot p/ a regra valer"
+	fi
+
+	# --- binário ---
+	need_bin
+	log_ok "binário: $BIN"
+
+	if [ "$relogar" -eq 1 ]; then
+		log_warn "faça logout/login (ou reboot) antes de 'run' — o grupo 'input' só vale em sessão nova"
+	fi
+}
 cmd_config() { printf >&2 'config: não implementado\n'; exit 1; }
 cmd_keygen() { printf >&2 'keygen: não implementado\n'; exit 1; }
 cmd_run() { printf >&2 'run: não implementado\n'; exit 1; }
