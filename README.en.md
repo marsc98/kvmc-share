@@ -83,6 +83,36 @@ flowchart LR
   if you want clipboard sync (optional — the KVM works fine without it,
   just without syncing the clipboard).
 
+## Quick setup (`scripts/setup.sh`)
+
+The easiest way to prepare a machine is the wizard:
+
+```bash
+./scripts/setup.sh
+```
+
+It walks you, in order, through every manual step below: permissions (`input`
+group, udev rule for `/dev/uinput`), building/locating the binary, picking the
+capture devices, generating `peers.toml`, and exchanging PSKs with the
+neighbours. It is idempotent — running it again detects what is already done.
+
+Each step is also a standalone subcommand:
+
+| Subcommand | What it does |
+| --- | --- |
+| `deps` | `input` group, udev rule for `/dev/uinput`, binary |
+| `config` | capture devices (`KVMC_SHARE_DEVICES`) + `peers.toml` |
+| `keygen` | per-peer PSK (generate/receive, distribute over `scp`) |
+| `run` | start the daemon in the foreground (reads `~/.config/kvmc-share/env`) |
+| `service` | install a `systemd --user` unit + `enable-linger` |
+| `doctor` | diagnose what is and isn't ready |
+| `uninstall` | remove the unit, udev rule and `~/.config/kvmc-share` |
+
+`KVMC_BIN=/path/to/kvmc-share ./scripts/setup.sh` points at a pre-built binary
+(useful on a machine without `cargo`).
+
+Not sure it's all wired up? `./scripts/setup.sh doctor`.
+
 ## Building
 
 ```bash

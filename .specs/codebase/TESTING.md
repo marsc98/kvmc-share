@@ -44,4 +44,4 @@ verificação manual documentada nos blocos `Verify` de
 
 ### Contagem de testes
 
-Atualizar aqui ao fechar a feature. Baseline (T1): 2 testes bats.
+`scripts/setup.sh`: **72 testes bats** (`bats tests/`), `shellcheck -x` limpo.

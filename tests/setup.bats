@@ -206,6 +206,11 @@ call() {
 	[ "$output" = "" ]
 }
 
+@test "_res_grep: multi-monitor — usa a 1ª saída ativa" {
+	run bash -c 'source "$1"; strip_ansi < "$2" | _res_grep "(current)"' _ "$SETUP" "$FIXTURES/cosmic-randr.dual.out"
+	[ "$output" = "1920 1080" ]
+}
+
 @test "detect_resolution: se alguma ferramenta existe, saída é 'N N' ou vazia" {
 	if ! command -v cosmic-randr >/dev/null && ! command -v wlr-randr >/dev/null && ! command -v xrandr >/dev/null; then
 		skip "nenhuma ferramenta de randr"
@@ -455,6 +460,19 @@ IN
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"scp falhou — copie manualmente"* ]]
 	[[ "$output" == *"scp "*"peers/desktop--laptop.psk"* ]]
+}
+
+@test "_keygen_peer: leitura curta de /dev/urandom aborta sem PSK parcial" {
+	run bash -c '
+		source "$1"
+		head() { command head -c 10 /dev/zero; }
+		ssh() { return 0; }
+		scp() { return 0; }
+		PSK_DIR=$(mktemp -d)/peers
+		_keygen_peer desktop laptop 1.2.3.4:7532 <<<"g"
+	' _ "$SETUP"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"menos de 32 bytes"* ]]
 }
 
 @test "_keygen_peer: papel 'recebo' sem PSK aborta com instrução" {
