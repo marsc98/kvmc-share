@@ -659,7 +659,16 @@ cmd_keygen() {
 		_keygen_peer "$lname" "$pname" "$paddr"
 	done < <(_peer_list "$PEERS_TOML")
 }
-cmd_run() { printf >&2 'run: não implementado\n'; exit 1; }
+cmd_run() {
+	[ -e "$ENV_FILE" ] || die "sem $ENV_FILE — rode 'config' antes"
+	need_bin
+	set -a
+	# shellcheck source=/dev/null
+	. "$ENV_FILE"
+	set +a
+	log_info "kvmc-share run  (Ctrl-C encerra)"
+	exec "$BIN" run
+}
 cmd_service() { printf >&2 'service: não implementado\n'; exit 1; }
 cmd_doctor() { printf >&2 'doctor: não implementado\n'; exit 1; }
 cmd_uninstall() { printf >&2 'uninstall: não implementado\n'; exit 1; }

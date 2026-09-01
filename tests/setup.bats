@@ -485,3 +485,33 @@ IN
 	[ "$status" -eq 1 ]
 	[[ "$output" == *"rode 'config' antes"* ]]
 }
+
+# --- cmd_run --------------------------------------------------------
+
+@test "cmd_run: sem env aborta pedindo 'config'" {
+	run bash -c 'source "$1"; ENV_FILE=/no/such/env; cmd_run' _ "$SETUP"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"rode 'config' antes"* ]]
+}
+
+@test "cmd_run: carrega o env e faz exec do binário com 'run'" {
+	run bash -c '
+		source "$1"
+		ENV_FILE=$(mktemp)
+		printf "KVMC_SHARE_DEVICES=/dev/input/eventZ\n" > "$ENV_FILE"
+		# binário fake que só ecoa argv e o env relevante
+		KVMC_BIN=$(mktemp)
+		cat > "$KVMC_BIN" <<EOS
+#!/usr/bin/env bash
+echo "argv=\$*"
+echo "dev=\$KVMC_SHARE_DEVICES"
+EOS
+		chmod +x "$KVMC_BIN"
+		cmd_run
+		echo "NAO DEVERIA CHEGAR AQUI"
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"argv=run"* ]]
+	[[ "$output" == *"dev=/dev/input/eventZ"* ]]
+	[[ "$output" != *"NAO DEVERIA CHEGAR"* ]]
+}
