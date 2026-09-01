@@ -156,3 +156,29 @@ call() {
 	[[ "${lines[1]}" == *.bak.1700000000-1 ]]
 	[[ "${lines[2]}" == *.bak.1700000000-2 ]]
 }
+
+# --- need_bin (só ramos puros, sem build/apt) ----------------------------
+
+@test "need_bin: KVMC_BIN executável é aceito e vira \$BIN" {
+	run bash -c 'source "$1"; KVMC_BIN=/bin/true; need_bin; echo "$BIN $_BIN_OK"' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[ "$output" = "/bin/true 1" ]
+}
+
+@test "need_bin: KVMC_BIN inexistente aborta" {
+	run bash -c 'source "$1"; KVMC_BIN=/no/such/bin; need_bin' _ "$SETUP"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"não é um executável"* ]]
+}
+
+@test "need_bin: fora do repo e sem KVMC_BIN aborta com dica" {
+	run bash -c '
+		source "$1"
+		REPO_ROOT=$(mktemp -d)
+		BIN="$REPO_ROOT/target/release/kvmc-share"
+		unset KVMC_BIN
+		need_bin
+	' _ "$SETUP"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"rode de dentro do repo ou defina KVMC_BIN"* ]]
+}

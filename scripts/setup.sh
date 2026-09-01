@@ -191,6 +191,57 @@ ini_get() {
 	' "$file"
 }
 
+# _bin_runs — 0 se $BIN existe, é executável e roda nesta arquitetura.
+_bin_runs() {
+	[ -x "$BIN" ] || return 1
+	local rc=0
+	"$BIN" --kvmc-probe >/dev/null 2>&1 || rc=$?
+	[ "$rc" -ne 126 ] && [ "$rc" -ne 127 ]
+}
+
+# need_bin — garante um binário kvmc-share utilizável em $BIN.
+# Ordem: cache -> KVMC_BIN -> binário já presente -> cargo build -> apt install
+# cargo -> erro com link do rustup. Resultado cacheado em _BIN_OK.
+need_bin() {
+	[ -n "${_BIN_OK:-}" ] && return 0
+
+	if [ -n "${KVMC_BIN:-}" ]; then
+		[ -x "$KVMC_BIN" ] || die "KVMC_BIN=$KVMC_BIN não é um executável"
+		BIN="$KVMC_BIN"
+		_BIN_OK=1
+		return 0
+	fi
+
+	if _bin_runs; then
+		_BIN_OK=1
+		return 0
+	fi
+
+	if [ ! -f "$REPO_ROOT/Cargo.toml" ]; then
+		die "binário não encontrado e $REPO_ROOT não parece o repo do kvmc-share — rode de dentro do repo ou defina KVMC_BIN"
+	fi
+
+	if command -v cargo >/dev/null 2>&1; then
+		log_info "compilando kvmc-share (cargo build --release)…"
+		(cd "$REPO_ROOT" && cargo build --release)
+		_bin_runs || die "compilei mas $BIN ainda não roda"
+		_BIN_OK=1
+		return 0
+	fi
+
+	if command -v apt >/dev/null 2>&1 && confirm "cargo não encontrado — instalar via apt?"; then
+		run_priv apt install -y cargo
+		command -v cargo >/dev/null 2>&1 || die "apt install cargo não resolveu"
+		log_info "compilando kvmc-share (cargo build --release)…"
+		(cd "$REPO_ROOT" && cargo build --release)
+		_bin_runs || die "compilei mas $BIN ainda não roda"
+		_BIN_OK=1
+		return 0
+	fi
+
+	die "sem binário e sem cargo. Instale o Rust: https://rustup.rs"
+}
+
 # --- Subcomandos (stubs — preenchidos nas próximas tasks) --------------------
 
 cmd_deps() { printf >&2 'deps: não implementado\n'; exit 1; }
