@@ -710,3 +710,86 @@ EOS
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"apagar as chaves"* ]]
 }
+
+# --- cmd_wizard ------------------------------------------------------
+
+@test "cmd_wizard: roda deps->config->keygen na ordem e respeita subida" {
+	run bash -c '
+		source "$1"
+		order=""
+		cmd_deps() { order="$order deps"; }
+		cmd_config() { order="$order config"; }
+		cmd_keygen() { order="$order keygen"; }
+		cmd_run() { order="$order run"; }
+		cmd_service() { order="$order service"; }
+		_deps_done() { return 1; }
+		_config_done() { return 1; }
+		_keygen_done() { return 1; }
+		cmd_wizard <<<"f"
+		echo "ORDER:$order"
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"ORDER: deps config keygen run"* ]]
+	[[ "$output" == *"copied"* ]]
+}
+
+@test "cmd_wizard: etapa já pronta é pulada quando recusam refazer" {
+	run bash -c '
+		source "$1"
+		order=""
+		cmd_deps() { order="$order deps"; }
+		cmd_config() { order="$order config"; }
+		cmd_keygen() { order="$order keygen"; }
+		_deps_done() { return 0; }
+		_config_done() { return 1; }
+		_keygen_done() { return 1; }
+		confirm() { return 1; }
+		cmd_wizard 2>/dev/null <<<"n"
+		echo "ORDER:$order"
+	' _ "$SETUP"
+	[[ "$output" == *"ORDER: config keygen"* ]]
+}
+
+@test "cmd_wizard: falha em etapa obrigatória interrompe o wizard" {
+	run bash -c '
+		source "$1"
+		order=""
+		cmd_deps() { die "boom"; }
+		cmd_config() { order="$order config"; }
+		_deps_done() { return 1; }
+		cmd_wizard 2>/dev/null
+		echo "ORDER:$order"
+	' _ "$SETUP"
+	[ "$status" -eq 1 ]
+	[[ "$output" != *"config"* ]]
+}
+
+@test "cmd_wizard: escolha 'n' na subida não roda run nem service" {
+	run bash -c '
+		source "$1"
+		ran=""
+		cmd_deps() { :; }; cmd_config() { :; }; cmd_keygen() { :; }
+		cmd_run() { ran="$ran run"; }
+		cmd_service() { ran="$ran service"; }
+		_deps_done() { return 1; }; _config_done() { return 1; }; _keygen_done() { return 1; }
+		cmd_wizard 2>/dev/null <<<"n"
+		echo "RAN:[$ran]"
+	' _ "$SETUP"
+	[[ "$output" == *"RAN:[]"* ]]
+}
+
+@test "_config_done: exige env + peers.toml válido" {
+	run bash -c '
+		source "$1"
+		d=$(mktemp -d)
+		ENV_FILE="$d/env"; PEERS_TOML="$d/peers.toml"
+		_config_done && echo A || echo "sem-nada"
+		: > "$ENV_FILE"
+		_config_done && echo B || echo "sem-peers"
+		cp "$2" "$PEERS_TOML"
+		_config_done && echo "ok-completo" || echo D
+	' _ "$SETUP" "$FIXTURES/peers.sample.toml"
+	[[ "$output" == *"sem-nada"* ]]
+	[[ "$output" == *"sem-peers"* ]]
+	[[ "$output" == *"ok-completo"* ]]
+}

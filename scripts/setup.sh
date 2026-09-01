@@ -876,7 +876,57 @@ cmd_uninstall() {
 
 	log_warn "mantidos: usuário no grupo 'input' e enable-linger — remova à mão se quiser"
 }
-cmd_wizard() { printf >&2 'wizard: não implementado\n'; exit 1; }
+# --- wizard --------------------------------------------------------
+
+_deps_done() { _bin_runs && id -nG | grep -qw input && [ -w /dev/uinput ]; }
+
+_config_done() {
+	[ -e "$ENV_FILE" ] && [ -e "$PEERS_TOML" ] &&
+		validate_peers_toml "$PEERS_TOML" 2>/dev/null
+}
+
+_keygen_done() {
+	[ -e "$PEERS_TOML" ] || return 1
+	local lname pname rest pskf
+	lname="$(ini_get "$PEERS_TOML" '[local]' name)"
+	[ -n "$lname" ] || return 1
+	while IFS=$'\t' read -r pname rest; do
+		[ -n "$pname" ] || continue
+		pskf="$PSK_DIR/$(psk_name "$lname" "$pname").psk"
+		{ [ -s "$pskf" ] && [ "$(stat -c%s "$pskf")" -eq 32 ]; } || return 1
+	done < <(_peer_list "$PEERS_TOML")
+	return 0
+}
+
+# _wizard_step NOME DESC DONECHECK — roda cmd_NOME, pulando se DONECHECK passa
+# e o usuário não quiser refazer.
+_wizard_step() {
+	local name="$1" desc="$2" donecheck="$3"
+	printf '\n=== %s: %s ===\n' "$name" "$desc" >&2
+	if "$donecheck" && ! confirm "'$name' já parece pronto — refazer?"; then
+		log_info "pulando '$name'"
+		return 0
+	fi
+	"cmd_$name"
+}
+
+cmd_wizard() {
+	log_info "kvmc-share — assistente de configuração"
+
+	_wizard_step deps "grupo input, regra udev, binário" _deps_done
+	_wizard_step config "dispositivos + peers.toml" _config_done
+	_wizard_step keygen "PSK dos pares" _keygen_done
+
+	local choice
+	read -r -p "subir agora? [f]oreground / [s]erviço systemd / [n]ada: " choice || true
+	case "$choice" in
+	f | foreground) cmd_run ;;
+	s | servico | serviço | service) cmd_service ;;
+	*) log_info "depois rode 'setup.sh run' ou 'setup.sh service'" ;;
+	esac
+
+	log_info "clipboard: o 'copied' é opcional e não foi configurado (veja o README)"
+}
 
 # --- Dispatch ---------------------------------------------------------------
 
