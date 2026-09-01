@@ -242,6 +242,86 @@ need_bin() {
 	die "sem binário e sem cargo. Instale o Rust: https://rustup.rs"
 }
 
+# --- Camada 1b: parsers ---------------------------------------------------
+
+# _res_grep MARCADOR — de stdin, ecoa "W H" do 1º token NxN na 1ª linha que
+# contém a substring literal MARCADOR. Vazio se nada casar.
+_res_grep() {
+	awk -v mark="$1" '
+		index($0, mark) {
+			for (i = 1; i <= NF; i++)
+				if ($i ~ /^[0-9]+x[0-9]+$/) {
+					split($i, d, "x")
+					print d[1], d[2]
+					exit
+				}
+		}
+	'
+}
+
+# detect_resolution — ecoa "W H" da saída ativa. Ordem: cosmic-randr (nativo do
+# COSMIC, que não é wlroots) -> wlr-randr -> xrandr. Vazio se nenhuma detectar.
+detect_resolution() {
+	local out=""
+	if command -v cosmic-randr >/dev/null 2>&1; then
+		out=$(cosmic-randr list 2>/dev/null | strip_ansi | _res_grep '(current)')
+	fi
+	if [ -z "$out" ] && command -v wlr-randr >/dev/null 2>&1; then
+		out=$(wlr-randr 2>/dev/null | strip_ansi | _res_grep 'current')
+	fi
+	if [ -z "$out" ] && command -v xrandr >/dev/null 2>&1; then
+		out=$(xrandr 2>/dev/null | _res_grep '*')
+	fi
+	[ -n "$out" ] && printf '%s\n' "$out"
+}
+
+# validate_peers_toml ARQUIVO — checagem sintática leve (sem parser TOML):
+# tem [local] com name/width/height/listen e um psk_path por [[peer]].
+# 0 se ok; 1 + motivo em stderr caso contrário.
+validate_peers_toml() {
+	local f="$1" peers psks miss=() k
+	[ -f "$f" ] || {
+		echo "arquivo não existe: $f" >&2
+		return 1
+	}
+	grep -qE '^\[local\][[:space:]]*$' "$f" || {
+		echo "falta a seção [local]" >&2
+		return 1
+	}
+	for k in name width height listen; do
+		ini_get "$f" '[local]' "$k" | grep -q . || miss+=("local.$k")
+	done
+	peers=$(grep -cE '^\[\[peer\]\][[:space:]]*$' "$f" || true)
+	psks=$(grep -cE '^[[:space:]]*psk_path[[:space:]]*=' "$f" || true)
+	if [ "$peers" -ne "$psks" ]; then
+		echo "número de [[peer]] ($peers) difere de psk_path ($psks)" >&2
+		return 1
+	fi
+	if [ "${#miss[@]}" -gt 0 ]; then
+		echo "campos ausentes em [local]: ${miss[*]}" >&2
+		return 1
+	fi
+	return 0
+}
+
+# parse_input_devices — lê /proc/bus/input/devices (ou $DEVICES_FILE) e ecoa
+# "eventN<TAB>Nome" para cada handler de evento.
+parse_input_devices() {
+	local f="${DEVICES_FILE:-/proc/bus/input/devices}"
+	[ -f "$f" ] || return 1
+	awk '
+		/^N: Name=/ {
+			name = $0
+			sub(/^N: Name="/, "", name)
+			sub(/"[[:space:]]*$/, "", name)
+		}
+		/^H: Handlers=/ {
+			for (i = 1; i <= NF; i++)
+				if ($i ~ /^event[0-9]+$/) print $i "\t" name
+		}
+	' "$f"
+}
+
 # --- Subcomandos (stubs — preenchidos nas próximas tasks) --------------------
 
 cmd_deps() { printf >&2 'deps: não implementado\n'; exit 1; }

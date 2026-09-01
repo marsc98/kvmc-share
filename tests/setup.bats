@@ -182,3 +182,106 @@ call() {
 	[ "$status" -eq 1 ]
 	[[ "$output" == *"rode de dentro do repo ou defina KVMC_BIN"* ]]
 }
+
+# --- detect_resolution / _res_grep ---------------------------------------
+
+@test "_res_grep: extrai WxH da linha (current) do cosmic-randr (com ANSI)" {
+	run bash -c 'source "$1"; strip_ansi < "$2" | _res_grep "(current)"' _ "$SETUP" "$FIXTURES/cosmic-randr.out"
+	[ "$status" -eq 0 ]
+	[ "$output" = "1920 1080" ]
+}
+
+@test "_res_grep: wlr-randr — linha 'current'" {
+	run bash -c 'source "$1"; _res_grep current < "$2"' _ "$SETUP" "$FIXTURES/wlr-randr.out"
+	[ "$output" = "1920 1080" ]
+}
+
+@test "_res_grep: xrandr — linha com '*'" {
+	run bash -c 'source "$1"; _res_grep "*" < "$2"' _ "$SETUP" "$FIXTURES/xrandr.out"
+	[ "$output" = "1920 1080" ]
+}
+
+@test "_res_grep: sem marcador casando devolve vazio" {
+	run bash -c 'source "$1"; _res_grep "(current)" < "$2"' _ "$SETUP" "$FIXTURES/xrandr.out"
+	[ "$output" = "" ]
+}
+
+@test "detect_resolution: se alguma ferramenta existe, saída é 'N N' ou vazia" {
+	if ! command -v cosmic-randr >/dev/null && ! command -v wlr-randr >/dev/null && ! command -v xrandr >/dev/null; then
+		skip "nenhuma ferramenta de randr"
+	fi
+	run bash -c 'source "$1"; detect_resolution' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[[ "$output" == "" || "$output" =~ ^[0-9]+\ [0-9]+$ ]]
+}
+
+# --- validate_peers_toml ----------------------------------------------------
+
+@test "validate_peers_toml: fixture válido passa" {
+	run bash -c 'source "$1"; validate_peers_toml "$2"' _ "$SETUP" "$FIXTURES/peers.sample.toml"
+	[ "$status" -eq 0 ]
+}
+
+@test "validate_peers_toml: sem [local] falha" {
+	run bash -c '
+		source "$1"
+		f=$(mktemp)
+		printf "[[peer]]\nname = \"x\"\npsk_path = \"/tmp/x\"\n" > "$f"
+		validate_peers_toml "$f"
+	' _ "$SETUP"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"[local]"* ]]
+}
+
+@test "validate_peers_toml: [[peer]] sem psk_path falha" {
+	run bash -c '
+		source "$1"
+		f=$(mktemp)
+		cat > "$f" <<TOML
+[local]
+name = "d"
+width = 1
+height = 1
+listen = "0.0.0.0:7532"
+
+[[peer]]
+name = "l"
+addr = "1.2.3.4:7532"
+direction = "right"
+TOML
+		validate_peers_toml "$f"
+	' _ "$SETUP"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"psk_path"* ]]
+}
+
+@test "validate_peers_toml: campo ausente em [local] falha" {
+	run bash -c '
+		source "$1"
+		f=$(mktemp)
+		printf "[local]\nname = \"d\"\nlisten = \"0.0.0.0:7532\"\n" > "$f"
+		validate_peers_toml "$f"
+	' _ "$SETUP"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"width"* ]]
+}
+
+@test "validate_peers_toml: arquivo inexistente falha" {
+	run bash -c 'source "$1"; validate_peers_toml /no/such/peers.toml' _ "$SETUP"
+	[ "$status" -eq 1 ]
+}
+
+# --- parse_input_devices --------------------------------------------------
+
+@test "parse_input_devices: mapeia eventN -> Nome do fixture" {
+	run bash -c 'DEVICES_FILE="$2" bash -c "source \"$1\"; parse_input_devices"' _ "$SETUP" "$FIXTURES/proc-input-devices.txt"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"event3"*"AT Translated Set 2 keyboard"* ]]
+	[[ "$output" == *"event4"*"Logitech USB Receiver Mouse"* ]]
+	[[ "$output" == *"event5"*"SynPS/2 Synaptics TouchPad"* ]]
+}
+
+@test "parse_input_devices: arquivo ausente retorna 1" {
+	run bash -c 'DEVICES_FILE=/no/such/file bash -c "source \"$1\"; parse_input_devices"' _ "$SETUP"
+	[ "$status" -eq 1 ]
+}
