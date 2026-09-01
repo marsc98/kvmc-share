@@ -1,0 +1,11 @@
+[local]
+name = "me"
+width = 1920
+height = 1080
+listen = "0.0.0.0:7532"
+
+[[peer]]
+name = "near"
+addr = "127.0.0.1:1"
+psk_path = "~/.config/kvmc-share/peers/me--near.psk"
+direction = "right"

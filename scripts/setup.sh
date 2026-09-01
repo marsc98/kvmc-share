@@ -718,7 +718,126 @@ cmd_service() {
 		log_warn "não consegui habilitar linger — o serviço só sobe com sessão aberta"
 	systemctl --user status kvmc-share.service --no-pager || true
 }
-cmd_doctor() { printf >&2 'doctor: não implementado\n'; exit 1; }
+cmd_doctor() {
+	local fail=0
+
+	# (a) binário
+	if _bin_runs; then
+		log_ok "binário: $BIN"
+	else
+		log_err "binário ausente/inválido em $BIN — rode 'deps'"
+		fail=1
+	fi
+
+	# (b) grupo input
+	if id -nG | grep -qw input; then
+		log_ok "grupo 'input' ativo na sessão"
+	elif getent group input | grep -qw "$USER"; then
+		log_err "grupo 'input' na base mas não na sessão — faça logout/login"
+		fail=1
+	else
+		log_err "usuário fora do grupo 'input' — rode 'deps'"
+		fail=1
+	fi
+
+	# (c) /dev/uinput gravável
+	if [ -w /dev/uinput ]; then
+		log_ok "/dev/uinput gravável"
+	else
+		log_err "/dev/uinput não gravável — rode 'deps' e relogue"
+		fail=1
+	fi
+
+	# (d) env + dispositivos
+	if [ -e "$ENV_FILE" ]; then
+		local devline dev missing=0
+		devline="$(grep -E '^KVMC_SHARE_DEVICES=' "$ENV_FILE" | head -1 | cut -d= -f2-)"
+		if [ -z "$devline" ]; then
+			log_err "$ENV_FILE sem KVMC_SHARE_DEVICES — rode 'config'"
+			fail=1
+		else
+			local -a devs=()
+			IFS=: read -ra devs <<<"$devline"
+			for dev in "${devs[@]}"; do
+				{ [ -e "$dev" ] && [ -r "$dev" ]; } || {
+					log_warn "  dispositivo inacessível: $dev"
+					missing=1
+				}
+			done
+			if [ "$missing" -eq 0 ]; then
+				log_ok "dispositivos de captura acessíveis (${#devs[@]})"
+			else
+				log_err "dispositivos inacessíveis — rode 'deps'/'config'"
+				fail=1
+			fi
+		fi
+	else
+		log_err "sem $ENV_FILE — rode 'config'"
+		fail=1
+	fi
+
+	# (e) peers.toml
+	local lname=""
+	if [ -e "$PEERS_TOML" ] && validate_peers_toml "$PEERS_TOML" 2>/dev/null; then
+		log_ok "peers.toml válido"
+		lname="$(ini_get "$PEERS_TOML" '[local]' name)"
+	else
+		log_err "peers.toml ausente/inválido — rode 'config'"
+		fail=1
+	fi
+
+	# (f) PSKs
+	if [ -n "$lname" ]; then
+		local pname paddr pskf pfail=0
+		while IFS=$'\t' read -r pname paddr; do
+			[ -n "$pname" ] || continue
+			pskf="$PSK_DIR/$(psk_name "$lname" "$pname").psk"
+			if [ -s "$pskf" ] && [ "$(stat -c%s "$pskf")" -eq 32 ]; then
+				log_ok "PSK $pname: ok"
+			else
+				log_err "PSK $pname ausente/tamanho != 32 ($pskf) — rode 'keygen'"
+				pfail=1
+			fi
+		done < <(_peer_list "$PEERS_TOML")
+		[ "$pfail" -eq 1 ] && fail=1
+	fi
+
+	# (g) serviço (forte, mas não conta pro exit)
+	if systemctl --user is-active --quiet kvmc-share.service 2>/dev/null; then
+		log_ok "serviço systemd --user ativo"
+	else
+		log_info "serviço systemd --user inativo (use 'service' ou 'run')"
+	fi
+
+	# (h) conectividade por peer (informativo)
+	if [ -e "$PEERS_TOML" ]; then
+		local pname paddr host port st
+		while IFS=$'\t' read -r pname paddr; do
+			[ -n "$pname" ] || continue
+			host="${paddr%:*}"
+			port="${paddr##*:}"
+			host="${host##*@}"
+			st="$(tcp_probe "$host" "$port" 3 || true)"
+			log_info "peer $pname ($host:$port): $st"
+		done < <(_peer_list "$PEERS_TOML")
+	fi
+
+	# (i) clipboard (puramente informativo)
+	if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+		log_info "clipboard: indeterminado (XDG_RUNTIME_DIR não definido)"
+	elif [ -S "$XDG_RUNTIME_DIR/copied.sock" ] && pgrep -x copied >/dev/null 2>&1; then
+		log_ok "clipboard: copied ativo"
+	else
+		log_info "clipboard: copied inativo (opcional) — https://github.com/marsc98/copied"
+	fi
+
+	if [ "$fail" -eq 0 ]; then
+		log_ok "tudo pronto"
+	else
+		log_err "itens obrigatórios pendentes"
+	fi
+	return "$fail"
+}
 cmd_uninstall() { printf >&2 'uninstall: não implementado\n'; exit 1; }
 cmd_wizard() { printf >&2 'wizard: não implementado\n'; exit 1; }
 

@@ -572,3 +572,61 @@ EOS
 	[[ "$output" == *"reload:0"* ]]
 	[[ "$output" == *"unchanged"* ]]
 }
+
+# --- cmd_doctor -----------------------------------------------------
+
+@test "cmd_doctor: ambiente vazio -> exit 1 e itens obrigatórios pendentes" {
+	run bash -c '
+		source "$1"
+		d=$(mktemp -d)
+		ENV_FILE="$d/env"; PEERS_TOML="$d/peers.toml"; PSK_DIR="$d/peers"
+		KVMC_BIN=/no/such/bin
+		cmd_doctor
+	' _ "$SETUP"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"sem "*"/env"* ]]
+	[[ "$output" == *"peers.toml ausente/inválido"* ]]
+	[[ "$output" == *"itens obrigatórios pendentes"* ]]
+}
+
+@test "cmd_doctor: XDG_RUNTIME_DIR ausente -> clipboard indeterminado, sem crash" {
+	run bash -c '
+		source "$1"
+		d=$(mktemp -d)
+		ENV_FILE="$d/env"; PEERS_TOML="$d/peers.toml"; PSK_DIR="$d/peers"
+		KVMC_BIN=/bin/true
+		unset XDG_RUNTIME_DIR
+		cmd_doctor
+	' _ "$SETUP"
+	[[ "$output" == *"clipboard: indeterminado"* ]]
+}
+
+@test "cmd_doctor: peers.toml válido + PSKs de 32 bytes reportam ok" {
+	run bash -c '
+		source "$1"
+		d=$(mktemp -d)
+		PEERS_TOML="$2"
+		PSK_DIR="$d/peers"; mkdir -p "$PSK_DIR"
+		head -c 32 /dev/urandom > "$PSK_DIR/me--near.psk"
+		ENV_FILE="$d/env"
+		KVMC_BIN=/bin/true
+		XDG_RUNTIME_DIR="$d"
+		cmd_doctor
+	' _ "$SETUP" "$FIXTURES/peers.doctor.toml"
+	[[ "$output" == *"peers.toml válido"* ]]
+	[[ "$output" == *"PSK near: ok"* ]]
+	[[ "$output" == *"peer near (127.0.0.1:1): refused"* ]]
+}
+
+@test "cmd_doctor: PSK ausente aponta 'keygen'" {
+	run bash -c '
+		source "$1"
+		d=$(mktemp -d)
+		PEERS_TOML="$2"
+		PSK_DIR="$d/peers"; mkdir -p "$PSK_DIR"
+		ENV_FILE="$d/env"; KVMC_BIN=/bin/true; XDG_RUNTIME_DIR="$d"
+		cmd_doctor
+	' _ "$SETUP" "$FIXTURES/peers.doctor.toml"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"PSK near ausente"*"rode 'keygen'"* ]]
+}
