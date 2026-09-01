@@ -285,3 +285,50 @@ TOML
 	run bash -c 'DEVICES_FILE=/no/such/file bash -c "source \"$1\"; parse_input_devices"' _ "$SETUP"
 	[ "$status" -eq 1 ]
 }
+
+# --- _list_capture_devices ----------------------------------------------
+
+@test "_list_capture_devices: casa symlink by-id -> eventN -> nome" {
+	run bash -c '
+		source "$1"
+		d=$(mktemp -d); mkdir "$d/by-id"
+		ln -s /dev/input/event3 "$d/by-id/usb-Foo_Kbd-event-kbd"
+		ln -s /dev/input/event4 "$d/by-id/usb-Bar_Mouse-event-mouse"
+		BYID_DIR="$d/by-id" DEVICES_FILE="$2" _list_capture_devices
+	' _ "$SETUP" "$FIXTURES/proc-input-devices.txt"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"usb-Foo_Kbd-event-kbd"*"AT Translated Set 2 keyboard"* ]]
+	[[ "$output" == *"usb-Bar_Mouse-event-mouse"*"Logitech USB Receiver Mouse"* ]]
+}
+
+@test "_list_capture_devices: diretório ausente retorna 1" {
+	run bash -c 'source "$1"; BYID_DIR=/no/such _list_capture_devices' _ "$SETUP"
+	[ "$status" -eq 1 ]
+}
+
+@test "_list_capture_devices: sem symlinks casando devolve vazio, rc 0" {
+	run bash -c '
+		source "$1"
+		d=$(mktemp -d); mkdir "$d/by-id"
+		BYID_DIR="$d/by-id" DEVICES_FILE="$2" _list_capture_devices
+	' _ "$SETUP" "$FIXTURES/proc-input-devices.txt"
+	[ "$status" -eq 0 ]
+	[ "$output" = "" ]
+}
+
+# --- write_env --------------------------------------------------------
+
+@test "write_env: grava KVMC_SHARE_DEVICES com modo 600" {
+	run bash -c '
+		source "$1"
+		CONF_DIR=$(mktemp -d)/kvmc-share
+		ENV_FILE="$CONF_DIR/env"
+		write_env "/dev/input/eventA:/dev/input/eventB"
+		echo "---"
+		cat "$ENV_FILE"
+		stat -c "%a" "$ENV_FILE"
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"KVMC_SHARE_DEVICES=/dev/input/eventA:/dev/input/eventB"* ]]
+	[[ "$output" == *$'\n600' ]]
+}

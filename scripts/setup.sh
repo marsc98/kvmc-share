@@ -322,6 +322,28 @@ parse_input_devices() {
 	' "$f"
 }
 
+# _list_capture_devices — ecoa "path<TAB>nome" para cada symlink de teclado/mouse
+# em /dev/input/by-id (override BYID_DIR). Nome resolvido via parse_input_devices.
+_list_capture_devices() {
+	local dir="${BYID_DIR:-/dev/input/by-id}" link ev name devmap
+	[ -d "$dir" ] || return 1
+	devmap="$(parse_input_devices || true)"
+	for link in "$dir"/*-event-kbd "$dir"/*-event-mouse; do
+		[ -e "$link" ] || continue
+		ev="$(basename "$(readlink -f "$link")")"
+		name="$(printf '%s\n' "$devmap" | awk -F'\t' -v e="$ev" '$1 == e { print $2; exit }')"
+		printf '%s\t%s\n' "$link" "${name:-$ev}"
+	done
+}
+
+# write_env DEVICES — grava KVMC_SHARE_DEVICES=... em $ENV_FILE (0600).
+write_env() {
+	mkdir -p "$CONF_DIR"
+	printf 'KVMC_SHARE_DEVICES=%s\n' "$1" >"$ENV_FILE"
+	chmod 600 "$ENV_FILE"
+	log_ok "gravado $ENV_FILE"
+}
+
 # --- Subcomandos (stubs — preenchidos nas próximas tasks) --------------------
 
 cmd_deps() {
@@ -361,7 +383,70 @@ cmd_deps() {
 		log_warn "faça logout/login (ou reboot) antes de 'run' — o grupo 'input' só vale em sessão nova"
 	fi
 }
-cmd_config() { printf >&2 'config: não implementado\n'; exit 1; }
+# select_devices — menu de teclado/mouse, pré-seleção do 1º de cada, múltipla
+# escolha; valida leitura; persiste KVMC_SHARE_DEVICES.
+select_devices() {
+	local -a cand=() sel=()
+	mapfile -t cand < <(_list_capture_devices || true)
+
+	if [ "${#cand[@]}" -eq 0 ]; then
+		log_warn "nada em /dev/input/by-id/ — informe paths de /dev/input/event* à mão"
+		local -a manual=()
+		read -r -p "paths (espaço-separados): " -a manual
+		sel=("${manual[@]}")
+	else
+		local i path name first_kbd="" first_mouse=""
+		for i in "${!cand[@]}"; do
+			path="${cand[$i]%%$'\t'*}"
+			name="${cand[$i]#*$'\t'}"
+			printf '  [%d] %s\n      %s\n' "$((i + 1))" "$path" "$name"
+			case "$path" in
+			*-event-kbd) [ -z "$first_kbd" ] && first_kbd="$path" ;;
+			*-event-mouse) [ -z "$first_mouse" ] && first_mouse="$path" ;;
+			esac
+		done
+
+		local -a def_idx=()
+		for i in "${!cand[@]}"; do
+			path="${cand[$i]%%$'\t'*}"
+			[ "$path" = "$first_kbd" ] && def_idx+=("$((i + 1))")
+			[ "$path" = "$first_mouse" ] && def_idx+=("$((i + 1))")
+		done
+
+		local reply
+		read -r -p "números a capturar (espaço-separados) [${def_idx[*]}]: " reply
+		[ -z "$reply" ] && reply="${def_idx[*]}"
+		local -a nums=()
+		read -ra nums <<<"$reply"
+		local n
+		for n in "${nums[@]}"; do
+			if [ "$n" -ge 1 ] 2>/dev/null && [ "$n" -le "${#cand[@]}" ]; then
+				sel+=("${cand[$((n - 1))]%%$'\t'*}")
+			else
+				log_warn "índice inválido ignorado: $n"
+			fi
+		done
+	fi
+
+	[ "${#sel[@]}" -eq 0 ] && die "nenhum dispositivo selecionado"
+
+	local p bad=0
+	for p in "${sel[@]}"; do
+		[ -r "$p" ] || {
+			log_warn "sem permissão de leitura: $p  (rode 'deps' e relogue)"
+			bad=1
+		}
+	done
+	[ "$bad" -eq 1 ] && log_warn "prossigo; ajuste as permissões antes do 'run'"
+
+	local joined
+	joined="$(printf '%s:' "${sel[@]}")"
+	write_env "${joined%:}"
+}
+
+cmd_config() {
+	select_devices
+}
 cmd_keygen() { printf >&2 'keygen: não implementado\n'; exit 1; }
 cmd_run() { printf >&2 'run: não implementado\n'; exit 1; }
 cmd_service() { printf >&2 'service: não implementado\n'; exit 1; }
