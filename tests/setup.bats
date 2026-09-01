@@ -332,3 +332,79 @@ TOML
 	[[ "$output" == *"KVMC_SHARE_DEVICES=/dev/input/eventA:/dev/input/eventB"* ]]
 	[[ "$output" == *$'\n600' ]]
 }
+
+# --- write_peers_toml -------------------------------------------------
+
+@test "write_peers_toml: gera TOML válido com psk_path <menor>--<maior>" {
+	run bash -c '
+		source "$1"
+		CONF_DIR=$(mktemp -d)/kvmc-share
+		PEERS_TOML="$CONF_DIR/peers.toml"
+		write_peers_toml desktop 1920 1080 0.0.0.0:7532 \
+			"$(printf "laptop\t192.168.1.50:7532\tright")"
+		echo "==="
+		cat "$PEERS_TOML"
+		validate_peers_toml "$PEERS_TOML"
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *'psk_path = "~/.config/kvmc-share/peers/desktop--laptop.psk"'* ]]
+	[[ "$output" == *'direction = "right"'* ]]
+}
+
+@test "write_peers_toml: dois peers, psk_path por par" {
+	run bash -c '
+		source "$1"
+		CONF_DIR=$(mktemp -d)/kvmc-share
+		PEERS_TOML="$CONF_DIR/peers.toml"
+		write_peers_toml laptop 1920 1080 0.0.0.0:7532 \
+			"$(printf "desktop\t10.0.0.1:7532\tleft")" \
+			"$(printf "tv\t10.0.0.3:7532\tright")"
+		grep -c "^\[\[peer\]\]" "$PEERS_TOML"
+		grep psk_path "$PEERS_TOML"
+		validate_peers_toml "$PEERS_TOML"
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"peers/desktop--laptop.psk"* ]]
+	[[ "$output" == *"peers/laptop--tv.psk"* ]]
+}
+
+@test "write_peers_toml: faz backup .bak.<epoch> se já existir" {
+	run bash -c '
+		source "$1"
+		date() { echo 1700000000; }
+		CONF_DIR=$(mktemp -d)/kvmc-share
+		PEERS_TOML="$CONF_DIR/peers.toml"
+		mkdir -p "$CONF_DIR"; printf "antigo\n" > "$PEERS_TOML"
+		write_peers_toml desktop 1 1 0.0.0.0:7532 "$(printf "l\t1.2.3.4:7532\tright")"
+		ls "$CONF_DIR"
+		cat "$CONF_DIR/peers.toml.bak.1700000000"
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"peers.toml.bak.1700000000"* ]]
+	[[ "$output" == *"antigo"* ]]
+}
+
+# --- collect_peers (não-interativo via heredoc) --------------------------
+
+@test "collect_peers: rejeita nome repetido, nome=local e direção repetida" {
+	run bash -c '
+		source "$1"
+		collect_peers desktop 2>/dev/null <<IN
+2
+desktop
+laptop
+192.168.1.50
+right
+laptop
+tv
+10.0.0.3
+right
+up
+IN
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	# peer 1: "desktop" rejeitado (==local) -> "laptop"; addr; "right"
+	# peer 2: "laptop" rejeitado (repetido) -> "tv"; addr; "right" rejeitado -> "up"
+	[ "${lines[0]}" = "$(printf 'laptop\t192.168.1.50:7532\tright')" ]
+	[ "${lines[1]}" = "$(printf 'tv\t10.0.0.3:7532\tup')" ]
+}

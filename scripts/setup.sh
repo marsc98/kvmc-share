@@ -444,8 +444,121 @@ select_devices() {
 	write_env "${joined%:}"
 }
 
+_in_list() {
+	local x="$1" e
+	shift
+	for e in "$@"; do [ "$e" = "$x" ] && return 0; done
+	return 1
+}
+
+# collect_local — pergunta [local]; ecoa "name<TAB>width<TAB>height<TAB>listen".
+collect_local() {
+	local def_name def_listen name listen res w h ans
+	def_name="$(ini_get "$PEERS_TOML" '[local]' name 2>/dev/null || true)"
+	[ -n "$def_name" ] || def_name="$(hostname -s)"
+	read -r -p "nome desta máquina [$def_name]: " name || true
+	name="${name:-$def_name}"
+
+	def_listen="$(ini_get "$PEERS_TOML" '[local]' listen 2>/dev/null || true)"
+	[ -n "$def_listen" ] || def_listen="0.0.0.0:$SERVICE_PORT_DEFAULT"
+	read -r -p "endereço de escuta [$def_listen]: " listen || true
+	listen="${listen:-$def_listen}"
+
+	res="$(detect_resolution || true)"
+	if [ -n "$res" ]; then
+		w="${res% *}"
+		h="${res#* }"
+		read -r -p "resolução detectada ${w}x${h} — confirmar? [S/n]: " ans || true
+		[[ "$ans" == [nN]* ]] && res=""
+	fi
+	if [ -z "$res" ]; then
+		read -r -p "largura (px): " w || die "entrada interrompida"
+		read -r -p "altura (px): " h || die "entrada interrompida"
+	fi
+
+	printf '%s\t%s\t%s\t%s\n' "$name" "$w" "$h" "$listen"
+}
+
+# collect_peers LOCAL_NAME — pergunta N vizinhos; ecoa uma linha
+# "name<TAB>addr<TAB>direction" por peer. Rejeita nome/direção repetidos.
+collect_peers() {
+	local lname="$1" n i pname paddr pdir
+	local -a used_dirs=() used_names=()
+	read -r -p "quantos vizinhos imediatos? [1]: " n || true
+	n="${n:-1}"
+	for ((i = 1; i <= n; i++)); do
+		printf '— peer %d/%d —\n' "$i" "$n" >&2
+		while :; do
+			read -r -p "  nome: " pname || die "entrada interrompida"
+			[ -z "$pname" ] && {
+				echo "  nome vazio" >&2
+				continue
+			}
+			[ "$pname" = "$lname" ] && {
+				echo "  não pode ser o nome desta máquina" >&2
+				continue
+			}
+			_in_list "$pname" ${used_names[@]+"${used_names[@]}"} && {
+				echo "  nome repetido" >&2
+				continue
+			}
+			break
+		done
+		read -r -p "  host[:porta]: " paddr || die "entrada interrompida"
+		paddr="$(add_port_if_missing "$paddr")"
+		while :; do
+			read -r -p "  direção (left/right/up/down): " pdir || die "entrada interrompida"
+			case "$pdir" in
+			left | right | up | down) ;;
+			*)
+				echo "  direção inválida" >&2
+				continue
+				;;
+			esac
+			_in_list "$pdir" ${used_dirs[@]+"${used_dirs[@]}"} && {
+				echo "  direção repetida" >&2
+				continue
+			}
+			break
+		done
+		used_names+=("$pname")
+		used_dirs+=("$pdir")
+		printf '%s\t%s\t%s\n' "$pname" "$paddr" "$pdir"
+	done
+}
+
+# write_peers_toml LNAME W H LISTEN  PEER_SPEC...
+# PEER_SPEC = "name<TAB>addr<TAB>direction". Faz backup se já existir.
+write_peers_toml() {
+	local lname="$1" w="$2" h="$3" listen="$4"
+	shift 4
+	mkdir -p "$CONF_DIR"
+	[ -e "$PEERS_TOML" ] && log_info "backup: $(backup_file "$PEERS_TOML")"
+	{
+		printf '[local]\nname = "%s"\nwidth = %s\nheight = %s\nlisten = "%s"\n' \
+			"$lname" "$w" "$h" "$listen"
+		local spec pname paddr pdir
+		for spec in "$@"; do
+			IFS=$'\t' read -r pname paddr pdir <<<"$spec"
+			printf '\n[[peer]]\nname = "%s"\naddr = "%s"\npsk_path = "~/.config/kvmc-share/peers/%s.psk"\ndirection = "%s"\n' \
+				"$pname" "$paddr" "$(psk_name "$lname" "$pname")" "$pdir"
+		done
+	} >"$PEERS_TOML"
+	log_ok "gravado $PEERS_TOML"
+}
+
 cmd_config() {
 	select_devices
+
+	local lname w h listen
+	IFS=$'\t' read -r lname w h listen < <(collect_local)
+
+	local -a peerspecs=()
+	mapfile -t peerspecs < <(collect_peers "$lname")
+	[ "${#peerspecs[@]}" -eq 0 ] && die "nenhum peer configurado"
+
+	write_peers_toml "$lname" "$w" "$h" "$listen" "${peerspecs[@]}"
+	validate_peers_toml "$PEERS_TOML" || die "peers.toml gerado é inválido"
 }
 cmd_keygen() { printf >&2 'keygen: não implementado\n'; exit 1; }
 cmd_run() { printf >&2 'run: não implementado\n'; exit 1; }
