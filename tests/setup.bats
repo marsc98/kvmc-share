@@ -515,3 +515,60 @@ EOS
 	[[ "$output" == *"dev=/dev/input/eventZ"* ]]
 	[[ "$output" != *"NAO DEVERIA CHEGAR"* ]]
 }
+
+# --- cmd_service / _service_unit / _exec_start -------------------------
+
+@test "_exec_start: usa %h quando sob \$HOME" {
+	run bash -c 'source "$1"; HOME=/home/x; _exec_start /home/x/projetos/kvmc-share/target/release/kvmc-share' _ "$SETUP"
+	[ "$output" = "%h/projetos/kvmc-share/target/release/kvmc-share" ]
+}
+
+@test "_exec_start: caminho fora de \$HOME fica absoluto" {
+	run bash -c 'source "$1"; HOME=/home/x; _exec_start /opt/kvmc/kvmc-share' _ "$SETUP"
+	[ "$output" = "/opt/kvmc/kvmc-share" ]
+}
+
+@test "_service_unit: campos obrigatórios presentes" {
+	run bash -c 'source "$1"; _service_unit "%h/bin/kvmc-share"' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"ExecStart=%h/bin/kvmc-share run"* ]]
+	[[ "$output" == *"EnvironmentFile=%h/.config/kvmc-share/env"* ]]
+	[[ "$output" == *"Restart=on-failure"* ]]
+	[[ "$output" == *"RestartSec=2"* ]]
+	[[ "$output" == *"WantedBy=default.target"* ]]
+}
+
+@test "cmd_service: sem bus de usuário aborta sem escrever unit" {
+	run bash -c '
+		source "$1"
+		systemctl() { return 1; }
+		UNIT=$(mktemp -d)/kvmc-share.service
+		cmd_service
+		[ -e "$UNIT" ] && echo "UNIT ESCRITO" || echo "unit ausente"
+	' _ "$SETUP"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"sem bus de usuário"* ]]
+	[[ "$output" != *"UNIT ESCRITO"* ]]
+}
+
+@test "cmd_service: idempotente — unit igual não é reescrito nem recarregado" {
+	run bash -c '
+		source "$1"
+		calls=""
+		systemctl() { calls="$calls systemctl:$*"; return 0; }
+		loginctl() { return 0; }
+		KVMC_BIN=/bin/true
+		UNIT=$(mktemp -d)/kvmc-share.service
+		# primeira passada escreve
+		cmd_service >/dev/null 2>&1
+		before=$(cat "$UNIT")
+		calls=""
+		# segunda passada: conteúdo idêntico
+		cmd_service >/dev/null 2>&1
+		echo "reload:$(echo "$calls" | grep -c daemon-reload)"
+		[ "$(cat "$UNIT")" = "$before" ] && echo "unchanged"
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"reload:0"* ]]
+	[[ "$output" == *"unchanged"* ]]
+}

@@ -669,7 +669,55 @@ cmd_run() {
 	log_info "kvmc-share run  (Ctrl-C encerra)"
 	exec "$BIN" run
 }
-cmd_service() { printf >&2 'service: não implementado\n'; exit 1; }
+# _exec_start CAMINHO — ecoa o caminho com %h no lugar de $HOME quando aplicável.
+_exec_start() {
+	case "$1" in
+	"$HOME"/*) printf '%%h/%s' "${1#"$HOME"/}" ;;
+	*) printf '%s' "$1" ;;
+	esac
+}
+
+# _service_unit EXECSTART — ecoa o conteúdo do unit systemd --user.
+_service_unit() {
+	cat <<EOF
+[Unit]
+Description=kvmc-share input/clipboard mesh
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=$1 run
+EnvironmentFile=%h/.config/kvmc-share/env
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+EOF
+}
+
+cmd_service() {
+	systemctl --user show-environment >/dev/null 2>&1 ||
+		die "sem bus de usuário (systemctl --user indisponível) — use 'run' em foreground ou uma sessão gráfica"
+	need_bin
+
+	local content
+	content="$(_service_unit "$(_exec_start "$BIN")")"
+
+	if [ -f "$UNIT" ] && [ "$(cat "$UNIT")" = "$content" ]; then
+		log_ok "unit já atualizado: $UNIT"
+	else
+		mkdir -p "$(dirname "$UNIT")"
+		printf '%s\n' "$content" >"$UNIT"
+		log_ok "gravado $UNIT"
+		systemctl --user daemon-reload
+	fi
+
+	systemctl --user enable --now kvmc-share.service
+	loginctl enable-linger "$USER" 2>/dev/null ||
+		log_warn "não consegui habilitar linger — o serviço só sobe com sessão aberta"
+	systemctl --user status kvmc-share.service --no-pager || true
+}
 cmd_doctor() { printf >&2 'doctor: não implementado\n'; exit 1; }
 cmd_uninstall() { printf >&2 'uninstall: não implementado\n'; exit 1; }
 cmd_wizard() { printf >&2 'wizard: não implementado\n'; exit 1; }
