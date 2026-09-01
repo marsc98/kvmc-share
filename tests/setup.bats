@@ -408,3 +408,80 @@ IN
 	[ "${lines[0]}" = "$(printf 'laptop\t192.168.1.50:7532\tright')" ]
 	[ "${lines[1]}" = "$(printf 'tv\t10.0.0.3:7532\tup')" ]
 }
+
+# --- _peer_list -------------------------------------------------------
+
+@test "_peer_list: um peer do fixture simples" {
+	run bash -c 'source "$1"; _peer_list "$2"' _ "$SETUP" "$FIXTURES/peers.sample.toml"
+	[ "$status" -eq 0 ]
+	[ "$output" = "$(printf 'laptop\t192.168.1.50:7532')" ]
+}
+
+@test "_peer_list: dois peers, ordem preservada, addr com user@" {
+	run bash -c 'source "$1"; _peer_list "$2"' _ "$SETUP" "$FIXTURES/peers.multi.toml"
+	[ "$status" -eq 0 ]
+	[ "${lines[0]}" = "$(printf 'desktop\t10.0.0.1:7532')" ]
+	[ "${lines[1]}" = "$(printf 'tv\tuser@10.0.0.3:7532')" ]
+}
+
+# --- cmd_keygen / _keygen_peer -----------------------------------------
+
+@test "_keygen_peer: papel 'gero' cria PSK de 32 bytes, modo 600, sem .tmp" {
+	run bash -c '
+		source "$1"
+		ssh() { return 0; }
+		scp() { return 0; }
+		PSK_DIR=$(mktemp -d)/peers
+		printf "g\n" | _keygen_peer desktop laptop 192.168.1.50:7532
+		f="$PSK_DIR/desktop--laptop.psk"
+		echo "size=$(stat -c%s "$f")"
+		echo "mode=$(stat -c%a "$f")"
+		echo "tmp=$(ls "$PSK_DIR"/*.tmp 2>/dev/null | wc -l)"
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"size=32"* ]]
+	[[ "$output" == *"mode=600"* ]]
+	[[ "$output" == *"tmp=0"* ]]
+}
+
+@test "_keygen_peer: papel 'gero' com scp falhando mostra bloco manual e pausa" {
+	run bash -c '
+		source "$1"
+		ssh() { return 1; }
+		scp() { return 1; }
+		PSK_DIR=$(mktemp -d)/peers
+		printf "g\n\n" | _keygen_peer desktop laptop 192.168.1.50:7532 2>&1
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"scp falhou — copie manualmente"* ]]
+	[[ "$output" == *"scp "*"peers/desktop--laptop.psk"* ]]
+}
+
+@test "_keygen_peer: papel 'recebo' sem PSK aborta com instrução" {
+	run bash -c '
+		source "$1"
+		PSK_DIR=$(mktemp -d)/peers; mkdir -p "$PSK_DIR"
+		printf "r\n" | _keygen_peer desktop laptop 192.168.1.50:7532 2>&1
+	' _ "$SETUP"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"rode 'keygen' no papel 'gero'"* ]]
+}
+
+@test "_keygen_peer: papel 'recebo' com PSK de 32 bytes reporta OK + sha256" {
+	run bash -c '
+		source "$1"
+		PSK_DIR=$(mktemp -d)/peers; mkdir -p "$PSK_DIR"
+		head -c 32 /dev/urandom > "$PSK_DIR/desktop--laptop.psk"
+		ssh() { return 1; }
+		printf "r\n" | _keygen_peer desktop laptop 10.255.255.1:7532 2>&1
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"PSK presente"* ]]
+	[[ "$output" == *"sha256:"* ]]
+}
+
+@test "cmd_keygen: sem peers.toml aborta" {
+	run bash -c 'source "$1"; PEERS_TOML=/no/such/peers.toml; cmd_keygen' _ "$SETUP"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"rode 'config' antes"* ]]
+}

@@ -1,0 +1,17 @@
+[local]
+name = "laptop"
+width = 1920
+height = 1080
+listen = "0.0.0.0:7532"
+
+[[peer]]
+name = "desktop"
+addr = "10.0.0.1:7532"
+psk_path = "~/.config/kvmc-share/peers/desktop--laptop.psk"
+direction = "left"
+
+[[peer]]
+name = "tv"
+addr = "user@10.0.0.3:7532"
+psk_path = "~/.config/kvmc-share/peers/laptop--tv.psk"
+direction = "right"

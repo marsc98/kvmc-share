@@ -322,6 +322,26 @@ parse_input_devices() {
 	' "$f"
 }
 
+# _peer_list ARQUIVO — ecoa "name<TAB>addr" para cada bloco [[peer]].
+_peer_list() {
+	awk '
+		function flush() { if (name != "") print name "\t" addr; name = ""; addr = "" }
+		{ line = $0; sub(/[[:space:]]+$/, "", line) }
+		line == "[[peer]]" { flush(); inpeer = 1; next }
+		inpeer && substr(line, 1, 1) == "[" { flush(); inpeer = 0 }
+		inpeer {
+			n = index(line, "=")
+			if (n == 0) next
+			k = substr(line, 1, n - 1); gsub(/^[[:space:]]+|[[:space:]]+$/, "", k)
+			v = substr(line, n + 1); gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+			gsub(/^"|"$/, "", v)
+			if (k == "name") name = v
+			else if (k == "addr") addr = v
+		}
+		END { flush() }
+	' "$1"
+}
+
 # _list_capture_devices — ecoa "path<TAB>nome" para cada symlink de teclado/mouse
 # em /dev/input/by-id (override BYID_DIR). Nome resolvido via parse_input_devices.
 _list_capture_devices() {
@@ -560,7 +580,85 @@ cmd_config() {
 	write_peers_toml "$lname" "$w" "$h" "$listen" "${peerspecs[@]}"
 	validate_peers_toml "$PEERS_TOML" || die "peers.toml gerado é inválido"
 }
-cmd_keygen() { printf >&2 'keygen: não implementado\n'; exit 1; }
+# _keygen_crosscheck PSK_FILE HOST BASE — compara sha256 local x remoto via SSH.
+_keygen_crosscheck() {
+	local psk_file="$1" host="$2" base="$3" local_sum remote_sum
+	command -v ssh >/dev/null 2>&1 || return 0
+	local_sum="$(sha256sum "$psk_file" | cut -d' ' -f1)"
+	remote_sum="$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" \
+		"sha256sum ~/.config/kvmc-share/peers/$base 2>/dev/null | cut -d' ' -f1" 2>/dev/null || true)"
+	if [ -z "$remote_sum" ]; then
+		log_info "cross-check pulado (sem SSH sem senha para $host)"
+	elif [ "$local_sum" = "$remote_sum" ]; then
+		log_ok "sha256 confere nos dois lados"
+	else
+		log_warn "sha256 DIVERGE — local $local_sum vs remoto $remote_sum"
+	fi
+}
+
+# _keygen_peer LNAME PNAME PADDR — trata a PSK de um par (papel gero/recebo).
+_keygen_peer() {
+	local lname="$1" pname="$2" paddr="$3" psk_file host base role
+	psk_file="$PSK_DIR/$(psk_name "$lname" "$pname").psk"
+	host="${paddr%:*}"
+	base="$(basename "$psk_file")"
+
+	printf '\n=== par %s <-> %s ===\n' "$lname" "$pname" >&2
+	read -r -p "papel neste par? [g]ero / [r]ecebo: " role || true
+
+	case "$role" in
+	r | recebo)
+		if [ -s "$psk_file" ] && [ "$(stat -c%s "$psk_file")" -eq 32 ]; then
+			log_ok "PSK presente: $psk_file"
+			printf 'sha256: %s\n' "$(sha256sum "$psk_file" | cut -d' ' -f1)" >&2
+		else
+			die "falta $psk_file (32 bytes) — rode 'keygen' no papel 'gero' em $pname"
+		fi
+		;;
+	*)
+		if [ -e "$psk_file" ] && ! confirm "PSK $psk_file já existe — sobrescrever?"; then
+			log_info "mantida a PSK existente"
+		else
+			mkdir -p "$PSK_DIR"
+			(
+				umask 077
+				head -c 32 /dev/urandom >"$psk_file.tmp"
+			)
+			if [ "$(stat -c%s "$psk_file.tmp" 2>/dev/null || echo 0)" -ne 32 ]; then
+				rm -f "$psk_file.tmp"
+				die "leitura de /dev/urandom devolveu menos de 32 bytes"
+			fi
+			mv "$psk_file.tmp" "$psk_file"
+			chmod 600 "$psk_file"
+			log_ok "PSK gerada: $psk_file"
+
+			if ssh "$host" 'mkdir -p ~/.config/kvmc-share/peers' &&
+				scp "$psk_file" "$host:.config/kvmc-share/peers/$base"; then
+				log_ok "PSK copiada para $host"
+			else
+				log_warn "scp falhou — copie manualmente:"
+				printf "  ssh %s 'mkdir -p ~/.config/kvmc-share/peers'\n" "$host" >&2
+				printf '  scp %s %s:.config/kvmc-share/peers/%s\n' "$psk_file" "$host" "$base" >&2
+				read -r -p "  copiei — Enter para seguir " _ || true
+			fi
+		fi
+		;;
+	esac
+
+	_keygen_crosscheck "$psk_file" "$host" "$base"
+}
+
+cmd_keygen() {
+	[ -f "$PEERS_TOML" ] || die "sem $PEERS_TOML — rode 'config' antes"
+	local lname pname paddr
+	lname="$(ini_get "$PEERS_TOML" '[local]' name)"
+	[ -n "$lname" ] || die "não achei [local].name em $PEERS_TOML"
+
+	while IFS=$'\t' read -r pname paddr; do
+		[ -n "$pname" ] || continue
+		_keygen_peer "$lname" "$pname" "$paddr"
+	done < <(_peer_list "$PEERS_TOML")
+}
 cmd_run() { printf >&2 'run: não implementado\n'; exit 1; }
 cmd_service() { printf >&2 'service: não implementado\n'; exit 1; }
 cmd_doctor() { printf >&2 'doctor: não implementado\n'; exit 1; }
