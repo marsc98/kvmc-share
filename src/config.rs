@@ -31,6 +31,17 @@ pub enum Direction {
     Down,
 }
 
+impl Direction {
+    fn as_str(self) -> &'static str {
+        match self {
+            Direction::Left => "left",
+            Direction::Right => "right",
+            Direction::Up => "up",
+            Direction::Down => "down",
+        }
+    }
+}
+
 impl std::str::FromStr for Direction {
     type Err = anyhow::Error;
 
@@ -130,6 +141,31 @@ pub fn contract_home(path: &Path) -> String {
 /// mesma lógica hoje inline em `keygen()` (`kvmc-share.rs:80`).
 pub fn default_psk_path(peer_name: &str) -> PathBuf {
     PathBuf::from(".config/kvmc-share/peers").join(format!("{peer_name}.psk"))
+}
+
+/// Regenera `peers.toml` inteiro a partir de `local`/`peers` (mesmo formato
+/// produzido por `write_peers_toml` no `setup.sh`) — sem edição incremental,
+/// já que o arquivo não tem comentários/formatação livre a preservar.
+pub fn save(path: &Path, local: &LocalConfig, peers: &[PeerConfig]) -> Result<()> {
+    let mut out = format!(
+        "[local]\nname = \"{}\"\nwidth = {}\nheight = {}\nlisten = \"{}\"\n",
+        local.name, local.width, local.height, local.listen
+    );
+    for peer in peers {
+        out.push_str(&format!(
+            "\n[[peer]]\nname = \"{}\"\naddr = \"{}\"\npsk_path = \"{}\"\ndirection = \"{}\"\n",
+            peer.name,
+            peer.addr,
+            contract_home(&peer.psk_path),
+            peer.direction.as_str()
+        ));
+    }
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("falha ao criar diretório {}", parent.display()))?;
+    }
+    std::fs::write(path, out).with_context(|| format!("falha ao gravar {}", path.display()))
 }
 
 #[cfg(test)]
@@ -264,5 +300,95 @@ direction = "right"
             default_path().unwrap(),
             PathBuf::from("/home/marco/.config/kvmc-share/peers.toml")
         );
+    }
+
+    #[test]
+    fn save_then_load_round_trips_with_multiple_peers() {
+        let dir = std::env::temp_dir().join("kvmc-share-test-save-roundtrip");
+        std::fs::create_dir_all(&dir).unwrap();
+        let laptop_psk = touch(&dir, "laptop.psk");
+        let tablet_psk = touch(&dir, "tablet.psk");
+
+        let local = LocalConfig {
+            name: "desktop".into(),
+            width: 2560,
+            height: 1440,
+            listen: "0.0.0.0:7532".into(),
+        };
+        let peers = vec![
+            PeerConfig {
+                name: "laptop".into(),
+                addr: "192.168.1.50:7532".parse().unwrap(),
+                psk_path: laptop_psk,
+                direction: Direction::Right,
+            },
+            PeerConfig {
+                name: "tablet".into(),
+                addr: "192.168.1.51:7532".parse().unwrap(),
+                psk_path: tablet_psk,
+                direction: Direction::Left,
+            },
+        ];
+
+        let path = dir.join("peers.toml");
+        save(&path, &local, &peers).unwrap();
+        let toml_str = std::fs::read_to_string(&path).unwrap();
+        let (loaded_local, loaded_peers) = parse_and_validate(&toml_str).unwrap();
+
+        assert_eq!(loaded_local, local);
+        assert_eq!(loaded_peers, peers);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn save_with_no_peers_round_trips() {
+        let dir = std::env::temp_dir().join("kvmc-share-test-save-no-peers");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let local = LocalConfig {
+            name: "desktop".into(),
+            width: 1920,
+            height: 1080,
+            listen: "0.0.0.0:7532".into(),
+        };
+
+        let path = dir.join("peers.toml");
+        save(&path, &local, &[]).unwrap();
+        let toml_str = std::fs::read_to_string(&path).unwrap();
+        let (loaded_local, loaded_peers) = parse_and_validate(&toml_str).unwrap();
+
+        assert_eq!(loaded_local, local);
+        assert!(loaded_peers.is_empty());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn save_writes_psk_path_with_tilde_notation_under_home() {
+        unsafe { std::env::set_var("HOME", "/home/marco") };
+        let dir = std::env::temp_dir().join("kvmc-share-test-save-tilde");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let local = LocalConfig {
+            name: "desktop".into(),
+            width: 1920,
+            height: 1080,
+            listen: "0.0.0.0:7532".into(),
+        };
+        let peers = vec![PeerConfig {
+            name: "laptop".into(),
+            addr: "192.168.1.50:7532".parse().unwrap(),
+            psk_path: PathBuf::from("/home/marco/.config/kvmc-share/peers/laptop.psk"),
+            direction: Direction::Right,
+        }];
+
+        let path = dir.join("peers.toml");
+        save(&path, &local, &peers).unwrap();
+        let toml_str = std::fs::read_to_string(&path).unwrap();
+
+        assert!(toml_str.contains(r#"psk_path = "~/.config/kvmc-share/peers/laptop.psk""#));
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
