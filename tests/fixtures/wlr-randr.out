@@ -1,0 +1,7 @@
+eDP-1 "LG Display 0x05E5 (eDP-1)"
+  Physical size: 340x190 mm
+  Enabled: yes
+  Modes:
+    1680x1050 px, 59.950001 Hz
+    1920x1080 px, 59.977001 Hz (preferred, current)
+  Position: 0,0

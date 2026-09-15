@@ -1,0 +1,10 @@
+[1meDP-1[0m [1;32m(enabled)[0m
+  Make: LG Display
+  Position: 0,0
+  Modes:
+    [35m1920x1080[0m @ [36m 59.977 Hz[0m[1;35m (current)[0m[1;32m (preferred)[0m
+    [35m1680x1050[0m @ [36m 59.950 Hz[0m
+
+[1mHDMI-A-1[0m [1;31m(disabled)[0m
+  Modes:
+    [35m3840x2160[0m @ [36m 60.000 Hz[0m[1;32m (preferred)[0m
