@@ -8,7 +8,7 @@
 use anyhow::{Context, Result, bail};
 use evdev::uinput::VirtualDevice;
 use evdev::{EventType, InputEvent};
-use kvmc_share::config::{Direction, LocalConfig, PeerConfig, default_path, default_psk_path, expand_home};
+use kvmc_share::config::{Direction, PeerConfig, default_path, default_psk_path, expand_home};
 use kvmc_share::focus::{Focus, FocusState, LocalInjector, PeerId, PeerSender};
 use kvmc_share::noise::{EncryptedChannel, handshake_as_initiator, handshake_as_responder};
 use kvmc_share::wire::{self, WireMessage};
@@ -265,6 +265,56 @@ fn cmd_peer_edit(mut args: Vec<String>) -> Result<()> {
     kvmc_share::config::save(&default_path()?, &local, &peers)?;
     println!(
         "peer '{name}' atualizado — reinicie o daemon (systemctl --user restart kvmc-share) pra aplicar"
+    );
+    Ok(())
+}
+
+/// Remove e devolve a entrada `name` de `peers` (pura, sem tocar disco).
+fn remove_peer(peers: &mut Vec<PeerConfig>, name: &str) -> Result<PeerConfig> {
+    let idx = peers
+        .iter()
+        .position(|p| p.name == name)
+        .with_context(|| format!("peer '{name}' não encontrado"))?;
+    Ok(peers.remove(idx))
+}
+
+/// Apaga o arquivo de PSK em `path`, tolerando ausência (já removido antes,
+/// ou nunca gerado via `keygen`).
+fn remove_psk_file(path: &Path) -> Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => {
+            Err(e).with_context(|| format!("falha ao remover PSK {}", path.display()))
+        }
+    }
+}
+
+/// `kvmc-share peer rm <nome>`. Confirma antes de remover a entrada e sua PSK.
+fn cmd_peer_rm(mut args: Vec<String>) -> Result<()> {
+    let name = args
+        .drain(..)
+        .next()
+        .context("uso: kvmc-share peer rm <nome>")?;
+
+    let (local, mut peers) = kvmc_share::config::load()?;
+    if !peers.iter().any(|p| p.name == name) {
+        bail!("peer '{name}' não encontrado");
+    }
+
+    if !confirm(
+        &mut std::io::stdin().lock(),
+        &format!("remover peer '{name}' e sua PSK? (s/N): "),
+    )? {
+        println!("cancelado");
+        return Ok(());
+    }
+
+    let removed = remove_peer(&mut peers, &name)?;
+    kvmc_share::config::save(&default_path()?, &local, &peers)?;
+    remove_psk_file(&removed.psk_path)?;
+    println!(
+        "peer '{name}' removido — reinicie o daemon (systemctl --user restart kvmc-share) pra aplicar"
     );
     Ok(())
 }
@@ -759,5 +809,37 @@ mod tests {
         let err = apply_peer_edit(&mut peers, "ghost", None, None).unwrap_err();
         assert!(err.to_string().contains("não encontrado"));
         assert_eq!(peers[0], sample_peer("laptop"));
+    }
+
+    #[test]
+    fn remove_peer_removes_and_returns_entry() {
+        let mut peers = vec![sample_peer("laptop"), sample_peer("tablet")];
+        let removed = remove_peer(&mut peers, "laptop").unwrap();
+        assert_eq!(removed.name, "laptop");
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].name, "tablet");
+    }
+
+    #[test]
+    fn remove_peer_unknown_name_fails_without_mutating() {
+        let mut peers = vec![sample_peer("laptop")];
+        let err = remove_peer(&mut peers, "ghost").unwrap_err();
+        assert!(err.to_string().contains("não encontrado"));
+        assert_eq!(peers.len(), 1);
+    }
+
+    #[test]
+    fn remove_psk_file_deletes_existing_file() {
+        let path = std::env::temp_dir().join("kvmc-share-test-rm-psk-existing.psk");
+        std::fs::write(&path, b"psk-bytes").unwrap();
+        remove_psk_file(&path).unwrap();
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn remove_psk_file_tolerates_missing_file() {
+        let path = std::env::temp_dir().join("kvmc-share-test-rm-psk-missing.psk");
+        std::fs::remove_file(&path).ok();
+        remove_psk_file(&path).unwrap();
     }
 }
