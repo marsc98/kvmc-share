@@ -8,14 +8,14 @@
 use anyhow::{Context, Result, bail};
 use evdev::uinput::VirtualDevice;
 use evdev::{EventType, InputEvent};
-use kvmc_share::config::{PeerConfig, expand_home};
+use kvmc_share::config::{Direction, LocalConfig, PeerConfig, default_path, default_psk_path, expand_home};
 use kvmc_share::focus::{Focus, FocusState, LocalInjector, PeerId, PeerSender};
 use kvmc_share::noise::{EncryptedChannel, handshake_as_initiator, handshake_as_responder};
 use kvmc_share::wire::{self, WireMessage};
 use kvmc_share::{TOGGLE_KEY, devices};
 use std::collections::HashMap;
 use std::io::Read;
-use std::net::{TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -157,6 +157,59 @@ fn format_peer_list(peers: &[PeerConfig]) -> String {
 fn cmd_peer_list() -> Result<()> {
     let (_local, peers) = kvmc_share::config::load()?;
     println!("{}", format_peer_list(&peers));
+    Ok(())
+}
+
+/// Monta um `PeerConfig` novo a partir de strings brutas de CLI (pura,
+/// sem tocar disco): parseia `addr`/`direction`, deriva `psk_path` pela
+/// convenção padrão ou usa `psk_path_override` quando informado.
+fn build_new_peer(
+    name: &str,
+    addr: &str,
+    direction: &str,
+    psk_path_override: Option<PathBuf>,
+) -> Result<PeerConfig> {
+    let addr: SocketAddr = addr
+        .parse()
+        .with_context(|| format!("--addr inválido: '{addr}'"))?;
+    let direction: Direction = direction.parse()?;
+    let psk_path = match psk_path_override {
+        Some(p) => p,
+        None => expand_home(&Path::new("~").join(default_psk_path(name)))?,
+    };
+    Ok(PeerConfig {
+        name: name.to_string(),
+        addr,
+        psk_path,
+        direction,
+    })
+}
+
+/// Insere `peer` em `peers` se o nome ainda não existir (pura, sem tocar disco).
+fn add_peer_to_list(peers: &mut Vec<PeerConfig>, peer: PeerConfig) -> Result<()> {
+    if peers.iter().any(|p| p.name == peer.name) {
+        bail!("peer '{}' já cadastrado", peer.name);
+    }
+    peers.push(peer);
+    Ok(())
+}
+
+/// `kvmc-share peer add <nome> --addr <ip:porta> --direction <dir> [--psk-path <caminho>]`.
+fn cmd_peer_add(mut args: Vec<String>) -> Result<()> {
+    let addr = take_flag(&mut args, "--addr")
+        .context("uso: kvmc-share peer add <nome> --addr <ip:porta> --direction <dir>")?;
+    let direction = take_flag(&mut args, "--direction").context("--direction é obrigatório")?;
+    let psk_path_override = take_flag(&mut args, "--psk-path").map(PathBuf::from);
+    let name = args
+        .into_iter()
+        .next()
+        .context("uso: kvmc-share peer add <nome> --addr <ip:porta> --direction <dir>")?;
+
+    let (local, mut peers) = kvmc_share::config::load()?;
+    let peer = build_new_peer(&name, &addr, &direction, psk_path_override)?;
+    add_peer_to_list(&mut peers, peer)?;
+    kvmc_share::config::save(&default_path()?, &local, &peers)?;
+    println!("peer '{name}' adicionado");
     Ok(())
 }
 
@@ -553,5 +606,60 @@ mod tests {
         let out = format_peer_list(&[]);
         assert!(!out.is_empty());
         assert!(out.contains("nenhum"));
+    }
+
+    #[test]
+    fn build_new_peer_derives_psk_path_by_convention() {
+        unsafe { std::env::set_var("HOME", "/home/marco") };
+        let peer = build_new_peer("laptop", "192.168.1.50:7532", "right", None).unwrap();
+        assert_eq!(peer.name, "laptop");
+        assert_eq!(peer.direction, kvmc_share::config::Direction::Right);
+        assert_eq!(
+            peer.psk_path,
+            PathBuf::from("/home/marco/.config/kvmc-share/peers/laptop.psk")
+        );
+    }
+
+    #[test]
+    fn build_new_peer_respects_psk_path_override() {
+        let peer = build_new_peer(
+            "laptop",
+            "192.168.1.50:7532",
+            "right",
+            Some(PathBuf::from("/custom/path.psk")),
+        )
+        .unwrap();
+        assert_eq!(peer.psk_path, PathBuf::from("/custom/path.psk"));
+    }
+
+    #[test]
+    fn build_new_peer_rejects_invalid_direction() {
+        let err = build_new_peer("laptop", "192.168.1.50:7532", "diagonal", None).unwrap_err();
+        assert!(err.to_string().contains("diagonal"));
+    }
+
+    #[test]
+    fn build_new_peer_rejects_malformed_addr() {
+        let err = build_new_peer("laptop", "not-an-addr", "right", None).unwrap_err();
+        assert!(err.to_string().contains("--addr inválido"));
+    }
+
+    #[test]
+    fn add_peer_to_list_rejects_duplicate_name_without_mutating() {
+        let mut peers = vec![PeerConfig {
+            name: "laptop".into(),
+            addr: "192.168.1.50:7532".parse().unwrap(),
+            psk_path: PathBuf::from("/dev/null"),
+            direction: kvmc_share::config::Direction::Right,
+        }];
+        let dup = PeerConfig {
+            name: "laptop".into(),
+            addr: "192.168.1.99:7532".parse().unwrap(),
+            psk_path: PathBuf::from("/dev/null"),
+            direction: kvmc_share::config::Direction::Left,
+        };
+        let err = add_peer_to_list(&mut peers, dup).unwrap_err();
+        assert!(err.to_string().contains("já cadastrado"));
+        assert_eq!(peers.len(), 1);
     }
 }
