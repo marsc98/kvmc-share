@@ -141,6 +141,25 @@ fn take_flag(args: &mut Vec<String>, flag: &str) -> Option<String> {
     Some(args.remove(idx))
 }
 
+/// Formata a lista de peers pra saída textual: uma linha por peer com
+/// nome, addr e direção. Lista vazia produz uma mensagem explícita.
+fn format_peer_list(peers: &[PeerConfig]) -> String {
+    if peers.is_empty() {
+        return "nenhum peer cadastrado (rode 'kvmc-share peer add')".to_string();
+    }
+    peers
+        .iter()
+        .map(|p| format!("{}\t{}\t{}", p.name, p.addr, p.direction))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn cmd_peer_list() -> Result<()> {
+    let (_local, peers) = kvmc_share::config::load()?;
+    println!("{}", format_peer_list(&peers));
+    Ok(())
+}
+
 fn run() -> Result<()> {
     let (local, peers) = kvmc_share::config::load()?;
     let psks: HashMap<String, [u8; 32]> = peers
@@ -505,5 +524,34 @@ mod tests {
         let value = take_flag(&mut args, "--addr");
         assert_eq!(value, None);
         assert_eq!(args, vec!["peer".to_string(), "list".to_string()]);
+    }
+
+    #[test]
+    fn format_peer_list_prints_one_line_per_peer() {
+        let peers = vec![
+            PeerConfig {
+                name: "laptop".into(),
+                addr: "192.168.1.50:7532".parse().unwrap(),
+                psk_path: PathBuf::from("/dev/null"),
+                direction: kvmc_share::config::Direction::Right,
+            },
+            PeerConfig {
+                name: "tablet".into(),
+                addr: "192.168.1.51:7532".parse().unwrap(),
+                psk_path: PathBuf::from("/dev/null"),
+                direction: kvmc_share::config::Direction::Left,
+            },
+        ];
+        let out = format_peer_list(&peers);
+        assert!(out.contains("laptop") && out.contains("192.168.1.50:7532") && out.contains("right"));
+        assert!(out.contains("tablet") && out.contains("192.168.1.51:7532") && out.contains("left"));
+        assert_eq!(out.lines().count(), 2);
+    }
+
+    #[test]
+    fn format_peer_list_empty_shows_explicit_message() {
+        let out = format_peer_list(&[]);
+        assert!(!out.is_empty());
+        assert!(out.contains("nenhum"));
     }
 }
