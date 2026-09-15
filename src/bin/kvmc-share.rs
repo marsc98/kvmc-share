@@ -109,18 +109,36 @@ fn keygen(args: Vec<String>) -> Result<()> {
     Ok(())
 }
 
-fn confirm_overwrite(path: &Path) -> Result<bool> {
-    print!(
-        "PSK já existe em {} — sobrescrever? (s/N): ",
-        path.display()
-    );
+/// Imprime `prompt`, lê uma linha de `reader` e devolve `true` pra
+/// "s"/"S"/"y"/"Y" — qualquer outra coisa (incluindo vazio) é `false`.
+/// Recebe o reader como parâmetro pra ser testável sem stdin real.
+fn confirm(reader: &mut impl std::io::BufRead, prompt: &str) -> Result<bool> {
+    print!("{prompt}");
     std::io::Write::flush(&mut std::io::stdout()).ok();
     let mut answer = String::new();
-    std::io::stdin()
+    reader
         .read_line(&mut answer)
         .context("falha ao ler resposta de stdin")?;
     let answer = answer.trim().to_lowercase();
     Ok(answer == "s" || answer == "y")
+}
+
+fn confirm_overwrite(path: &Path) -> Result<bool> {
+    confirm(
+        &mut std::io::stdin().lock(),
+        &format!("PSK já existe em {} — sobrescrever? (s/N): ", path.display()),
+    )
+}
+
+/// Extrai e remove `--flag valor` de `args`, na primeira ocorrência.
+/// `None` (sem alterar `args`) se a flag não aparecer.
+fn take_flag(args: &mut Vec<String>, flag: &str) -> Option<String> {
+    let idx = args.iter().position(|a| a == flag)?;
+    if idx + 1 >= args.len() {
+        return None;
+    }
+    args.remove(idx);
+    Some(args.remove(idx))
 }
 
 fn run() -> Result<()> {
@@ -455,5 +473,37 @@ mod tests {
         assert_eq!(mode & 0o777, 0o600);
 
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn confirm_accepts_s_and_y_case_insensitive() {
+        for input in ["s\n", "S\n", "y\n", "Y\n"] {
+            let mut reader = std::io::Cursor::new(input);
+            assert!(confirm(&mut reader, "confirma? ").unwrap());
+        }
+    }
+
+    #[test]
+    fn confirm_rejects_anything_else_including_empty() {
+        for input in ["n\n", "\n", "talvez\n"] {
+            let mut reader = std::io::Cursor::new(input);
+            assert!(!confirm(&mut reader, "confirma? ").unwrap());
+        }
+    }
+
+    #[test]
+    fn take_flag_removes_flag_and_value_when_found() {
+        let mut args = vec!["peer".into(), "add".into(), "--addr".into(), "1.2.3.4:7532".into()];
+        let value = take_flag(&mut args, "--addr");
+        assert_eq!(value.as_deref(), Some("1.2.3.4:7532"));
+        assert_eq!(args, vec!["peer".to_string(), "add".to_string()]);
+    }
+
+    #[test]
+    fn take_flag_returns_none_and_keeps_args_when_not_found() {
+        let mut args = vec!["peer".to_string(), "list".to_string()];
+        let value = take_flag(&mut args, "--addr");
+        assert_eq!(value, None);
+        assert_eq!(args, vec!["peer".to_string(), "list".to_string()]);
     }
 }
