@@ -39,10 +39,11 @@ enum Event {
 
 fn main() -> Result<()> {
     match std::env::args().nth(1).as_deref() {
-        None | Some("run") => run(),
+        None => run(vec![]),
+        Some("run") => run(std::env::args().skip(2).collect()),
         Some("keygen") => keygen(std::env::args().skip(2).collect()),
         _ => {
-            eprintln!("uso: kvmc-share [run|keygen <peer-name> <ip>]");
+            eprintln!("uso: kvmc-share [run [--to nome1,nome2]|keygen <peer-name> <ip>]");
             std::process::exit(1);
         }
     }
@@ -374,8 +375,40 @@ fn cmd_local_edit(mut args: Vec<String>) -> Result<()> {
     Ok(())
 }
 
-fn run() -> Result<()> {
+/// Restringe `peers` aos nomes em `to` (vazio = sem filtro, mantém todos).
+/// Nomes duplicados são deduplicados; nome inexistente é erro fatal.
+fn filter_peers_by_to(peers: Vec<PeerConfig>, to: &[String]) -> Result<Vec<PeerConfig>> {
+    if to.is_empty() {
+        return Ok(peers);
+    }
+    let wanted: std::collections::HashSet<&str> = to.iter().map(String::as_str).collect();
+    for name in &wanted {
+        if !peers.iter().any(|p| p.name == *name) {
+            bail!("peer '{name}' informado em --to não existe em peers.toml");
+        }
+    }
+    Ok(peers
+        .into_iter()
+        .filter(|p| wanted.contains(p.name.as_str()))
+        .collect())
+}
+
+/// Extrai todas as ocorrências de `--to` de `args` (flag repetida e/ou
+/// valores separados por vírgula), descartando entradas vazias. Vazio de
+/// volta = sem filtro.
+fn collect_to_names(args: &mut Vec<String>) -> Vec<String> {
+    let mut to = Vec::new();
+    while let Some(v) = take_flag(args, "--to") {
+        to.extend(v.split(',').map(str::to_string).filter(|s| !s.is_empty()));
+    }
+    to
+}
+
+fn run(mut args: Vec<String>) -> Result<()> {
+    let to = collect_to_names(&mut args);
+
     let (local, peers) = kvmc_share::config::load()?;
+    let peers = filter_peers_by_to(peers, &to)?;
     let psks: HashMap<String, [u8; 32]> = peers
         .iter()
         .map(|p| Ok((p.name.clone(), read_psk(&p.psk_path)?)))
@@ -938,5 +971,64 @@ mod tests {
         assert_eq!(local.width, 1280);
         assert_eq!(local.height, 720);
         assert_eq!(local.listen, "0.0.0.0:9999");
+    }
+
+    #[test]
+    fn filter_peers_by_to_empty_keeps_all_peers() {
+        let peers = vec![sample_peer("laptop"), sample_peer("tablet")];
+        let filtered = filter_peers_by_to(peers.clone(), &[]).unwrap();
+        assert_eq!(filtered, peers);
+    }
+
+    #[test]
+    fn filter_peers_by_to_restricts_to_named_peers() {
+        let peers = vec![sample_peer("laptop"), sample_peer("tablet")];
+        let filtered = filter_peers_by_to(peers, &["laptop".to_string()]).unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "laptop");
+    }
+
+    #[test]
+    fn filter_peers_by_to_dedupes_repeated_names_without_error() {
+        let peers = vec![sample_peer("laptop"), sample_peer("tablet")];
+        let filtered = filter_peers_by_to(
+            peers,
+            &["laptop".to_string(), "laptop".to_string()],
+        )
+        .unwrap();
+        assert_eq!(filtered.len(), 1);
+    }
+
+    #[test]
+    fn filter_peers_by_to_unknown_name_fails_before_returning() {
+        let peers = vec![sample_peer("laptop")];
+        let err = filter_peers_by_to(peers, &["ghost".to_string()]).unwrap_err();
+        assert!(err.to_string().contains("ghost"));
+    }
+
+    #[test]
+    fn collect_to_names_empty_flag_value_yields_no_filter() {
+        let mut args = vec!["--to".to_string(), "".to_string()];
+        assert_eq!(collect_to_names(&mut args), Vec::<String>::new());
+    }
+
+    #[test]
+    fn collect_to_names_only_commas_yields_no_filter() {
+        let mut args = vec!["--to".to_string(), ",,".to_string()];
+        assert_eq!(collect_to_names(&mut args), Vec::<String>::new());
+    }
+
+    #[test]
+    fn collect_to_names_supports_comma_list_and_repeated_flag() {
+        let mut args = vec![
+            "--to".to_string(),
+            "laptop,tablet".to_string(),
+            "--to".to_string(),
+            "tv".to_string(),
+        ];
+        assert_eq!(
+            collect_to_names(&mut args),
+            vec!["laptop".to_string(), "tablet".to_string(), "tv".to_string()]
+        );
     }
 }
