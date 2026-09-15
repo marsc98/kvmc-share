@@ -37,13 +37,42 @@ enum Event {
     PeerDisconnected(PeerId),
 }
 
+const USAGE: &str = "uso: kvmc-share [run [--to nome1,nome2]\n\
+                     \x20               |keygen <peer-name> <ip>\n\
+                     \x20               |peer <list|add|edit|rm> ...\n\
+                     \x20               |local edit [...]]";
+
 fn main() -> Result<()> {
-    match std::env::args().nth(1).as_deref() {
-        None => run(vec![]),
-        Some("run") => run(std::env::args().skip(2).collect()),
-        Some("keygen") => keygen(std::env::args().skip(2).collect()),
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    if args.is_empty() {
+        return run(args);
+    }
+
+    match args.remove(0).as_str() {
+        "run" => run(args),
+        "keygen" => keygen(args),
+        "peer" => {
+            if args.is_empty() {
+                eprintln!("{USAGE}");
+                std::process::exit(1);
+            }
+            match args.remove(0).as_str() {
+                "list" => cmd_peer_list(),
+                "add" => cmd_peer_add(args),
+                "edit" => cmd_peer_edit(args),
+                "rm" => cmd_peer_rm(args),
+                _ => {
+                    eprintln!("{USAGE}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        "local" if args.first().map(String::as_str) == Some("edit") => {
+            args.remove(0);
+            cmd_local_edit(args)
+        }
         _ => {
-            eprintln!("uso: kvmc-share [run [--to nome1,nome2]|keygen <peer-name> <ip>]");
+            eprintln!("{USAGE}");
             std::process::exit(1);
         }
     }
