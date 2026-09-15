@@ -221,6 +221,23 @@ see below):
 export KVMC_SHARE_DEVICES=/dev/input/by-id/usb-YOUR_KEYBOARD-event-kbd:/dev/input/by-id/usb-YOUR_MOUSE-event-mouse
 ```
 
+## Day-to-day peer management
+
+After the initial setup, edit the mesh without touching `peers.toml` by hand:
+
+| Subcommand | What it does |
+| --- | --- |
+| `peer list` | lists the registered peers (name, addr, direction) |
+| `peer add <name> --addr <ip:port> --direction <left\|right\|up\|down> [--psk-path <path>]` | registers a new peer; `psk_path` is derived by convention (run `keygen` next) |
+| `peer edit <name> [--addr ...] [--direction ...]` | with no flags, shows the current values; with flags, updates only the fields passed |
+| `peer rm <name>` | removes the entry and deletes the matching PSK (asks for confirmation) |
+| `local edit [--name ...] [--width ...] [--height ...] [--listen ...]` | same pattern as `peer edit`, but for the `[local]` section |
+
+None of these commands restart a daemon that's already running — they only
+write to `peers.toml` and remind you to run
+`systemctl --user restart kvmc-share` (or restart the manual `run`) to
+apply the change.
+
 ## Running
 
 On each machine in the mesh:
@@ -232,6 +249,13 @@ On each machine in the mesh:
 Order doesn't matter — each instance listens on `local.listen` and tries
 to connect to peers whose name is lexicographically greater than its own
 (avoiding both ends dialing each other at the same time).
+
+To restrict a session to a subset of already-registered peers (e.g. only
+`laptop` and `tv`, even if the mesh has more), use `--to`:
+
+```bash
+./target/release/kvmc-share run --to laptop,tv
+```
 
 Move the cursor to the configured edge, or press **Scroll Lock**, to
 switch control manually at any time.

@@ -218,6 +218,22 @@ ver abaixo):
 export KVMC_SHARE_DEVICES=/dev/input/by-id/usb-SEU_TECLADO-event-kbd:/dev/input/by-id/usb-SEU_MOUSE-event-mouse
 ```
 
+## Gestão de peers no dia a dia
+
+Depois do setup inicial, edite a malha sem mexer no `peers.toml` na mão:
+
+| Subcomando | O que faz |
+| --- | --- |
+| `peer list` | lista os peers cadastrados (nome, addr, direction) |
+| `peer add <nome> --addr <ip:porta> --direction <left\|right\|up\|down> [--psk-path <caminho>]` | cadastra um peer novo; `psk_path` é derivado por convenção (rode `keygen` em seguida) |
+| `peer edit <nome> [--addr ...] [--direction ...]` | sem flags, mostra os valores atuais; com flags, atualiza só os campos passados |
+| `peer rm <nome>` | remove a entrada e apaga a PSK correspondente (pede confirmação) |
+| `local edit [--name ...] [--width ...] [--height ...] [--listen ...]` | mesmo padrão de `peer edit`, mas para a seção `[local]` |
+
+Nenhum desses comandos reinicia um daemon já rodando — eles só escrevem no
+`peers.toml` e avisam que é preciso `systemctl --user restart kvmc-share`
+(ou reiniciar o `run` manual) pra aplicar.
+
 ## Rodando
 
 Em cada máquina da malha:
@@ -229,6 +245,13 @@ Em cada máquina da malha:
 Não importa a ordem — cada instância escuta em `local.listen` e tenta
 conectar nos peers com nome lexicograficamente maior que o seu (evita duas
 pontas discando uma pra outra ao mesmo tempo).
+
+Pra restringir a sessão a um subconjunto dos peers já cadastrados (ex.: só
+`laptop` e `tv`, mesmo tendo outros na malha), use `--to`:
+
+```bash
+./target/release/kvmc-share run --to laptop,tv
+```
 
 Mova o cursor até a borda configurada, ou pressione **Scroll Lock**, pra
 alternar o controle manualmente a qualquer momento.
