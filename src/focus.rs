@@ -16,7 +16,14 @@ pub type PeerId = String;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FocusState {
     Local,
-    Capturing { target: PeerId },
+    /// `resume` é o estado de onde essa captura partiu (`Local` numa captura
+    /// inicial, `Receiving { source }` num relay em cadeia) — usado por
+    /// `on_focus_handoff` pra voltar ao lugar certo quando `target` devolve o
+    /// controle, em vez de sempre pousar em `Receiving`.
+    Capturing {
+        target: PeerId,
+        resume: Box<FocusState>,
+    },
     Receiving { source: PeerId },
 }
 
@@ -71,7 +78,7 @@ impl<I: LocalInjector, S: PeerSender> Focus<I, S> {
     pub fn on_input_event(&mut self, ev: InputEvent) {
         match &self.state {
             FocusState::Local => self.maybe_capture(ev),
-            FocusState::Capturing { target } => {
+            FocusState::Capturing { target, .. } => {
                 let target = target.clone();
                 self.sender.send_to(&target, &WireMessage::InputEvent(ev));
             }
@@ -96,7 +103,10 @@ impl<I: LocalInjector, S: PeerSender> Focus<I, S> {
             FocusState::Local => {
                 if let Some(target) = self.last_target.clone() {
                     self.sender.send_to(&target, &WireMessage::FocusHandoff);
-                    self.state = FocusState::Capturing { target };
+                    self.state = FocusState::Capturing {
+                        target,
+                        resume: Box::new(FocusState::Local),
+                    };
                 }
             }
             FocusState::Receiving { .. } => {}
@@ -107,7 +117,7 @@ impl<I: LocalInjector, S: PeerSender> Focus<I, S> {
     /// estado atual (source ou target) sempre retorna pra `Local`.
     pub fn on_peer_disconnected(&mut self, peer: &PeerId) {
         let involved = match &self.state {
-            FocusState::Capturing { target } => target == peer,
+            FocusState::Capturing { target, .. } => target == peer,
             FocusState::Receiving { source } => source == peer,
             FocusState::Local => false,
         };
@@ -116,7 +126,17 @@ impl<I: LocalInjector, S: PeerSender> Focus<I, S> {
         }
     }
 
+    /// Se `from` é justamente o peer pro qual eu abri uma captura (`target`),
+    /// esse handoff é ele devolvendo o controle — volto pro `resume` guardado,
+    /// não pra `Receiving`. Caso contrário é uma captura nova chegando (ou
+    /// interrompendo um relay em andamento), mesma lógica de antes.
     fn on_focus_handoff(&mut self, from: PeerId) {
+        if let FocusState::Capturing { target, resume } = &self.state
+            && *target == from
+        {
+            self.state = *resume.clone();
+            return;
+        }
         let keep_current =
             matches!(&self.state, FocusState::Receiving { source } if *source < from);
         if !keep_current {
@@ -130,7 +150,7 @@ impl<I: LocalInjector, S: PeerSender> Focus<I, S> {
                 self.injector.inject(ev);
                 self.maybe_capture(ev);
             }
-            FocusState::Capturing { target } => {
+            FocusState::Capturing { target, .. } => {
                 let target = target.clone();
                 self.sender.send_to(&target, &WireMessage::InputEvent(ev));
             }
@@ -148,9 +168,10 @@ impl<I: LocalInjector, S: PeerSender> Focus<I, S> {
         let Some(target) = self.peer_for(direction) else {
             return;
         };
+        let resume = Box::new(self.state.clone());
         self.sender.send_to(&target, &WireMessage::FocusHandoff);
         self.last_target = Some(target.clone());
-        self.state = FocusState::Capturing { target };
+        self.state = FocusState::Capturing { target, resume };
     }
 
     fn accumulate(&mut self, ev: InputEvent) -> Option<Direction> {
@@ -229,7 +250,8 @@ mod tests {
         assert_eq!(
             f.state(),
             &FocusState::Capturing {
-                target: "laptop".into()
+                target: "laptop".into(),
+                resume: Box::new(FocusState::Local)
             }
         );
         assert_eq!(
@@ -260,7 +282,8 @@ mod tests {
         assert_eq!(
             f.state(),
             &FocusState::Capturing {
-                target: "laptop".into()
+                target: "laptop".into(),
+                resume: Box::new(FocusState::Local)
             }
         );
     }
@@ -282,7 +305,10 @@ mod tests {
         assert_eq!(
             f.state(),
             &FocusState::Capturing {
-                target: "desktop-b".into()
+                target: "desktop-b".into(),
+                resume: Box::new(FocusState::Receiving {
+                    source: "desktop-a".into()
+                })
             }
         );
         assert!(
@@ -357,8 +383,50 @@ mod tests {
         assert_eq!(
             f.state(),
             &FocusState::Capturing {
-                target: "laptop".into()
+                target: "laptop".into(),
+                resume: Box::new(FocusState::Local)
             }
+        );
+    }
+
+    #[test]
+    fn focus_handoff_from_current_target_returns_to_resume_state() {
+        let mut f = focus(vec![peer("meu", Direction::Right)]);
+        f.on_input_event(rel_x(1000));
+        assert!(matches!(f.state(), FocusState::Capturing { .. }));
+
+        f.on_wire_message("meu".into(), WireMessage::FocusHandoff);
+
+        assert_eq!(
+            f.state(),
+            &FocusState::Local,
+            "handoff de quem eu capturei deve voltar pro estado de origem, não Receiving"
+        );
+    }
+
+    #[test]
+    fn focus_handoff_from_target_mid_chain_resumes_receiving_not_local() {
+        let mut f = focus(vec![peer("terceiro", Direction::Right)]);
+        f.on_wire_message("nav".into(), WireMessage::FocusHandoff);
+        f.on_wire_message("nav".into(), WireMessage::InputEvent(rel_x(1000)));
+        assert_eq!(
+            f.state(),
+            &FocusState::Capturing {
+                target: "terceiro".into(),
+                resume: Box::new(FocusState::Receiving {
+                    source: "nav".into()
+                })
+            }
+        );
+
+        f.on_wire_message("terceiro".into(), WireMessage::FocusHandoff);
+
+        assert_eq!(
+            f.state(),
+            &FocusState::Receiving {
+                source: "nav".into()
+            },
+            "no meio de uma cadeia, retorno deve resumir Receiving da origem, não Local"
         );
     }
 }

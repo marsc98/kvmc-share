@@ -35,6 +35,11 @@ PSK_DIR="$CONF_DIR/peers"
 UDEV_RULE="/etc/udev/rules.d/99-kvmc-share-uinput.rules"
 UDEV_LINE='KERNEL=="uinput", GROUP="input", MODE="0660"'
 
+# Regras geradas pra periféricos sem symlink nativo em /dev/input/by-id
+# (ex: mouse/teclado Bluetooth) — uma linha por dispositivo, chaveada por
+# ATTRS{uniq} (MAC/serial). Ver ensure_stable_device_path.
+PERIPHERALS_RULES_FILE="/etc/udev/rules.d/99-kvmc-share-peripherals.rules"
+
 UNIT="$HOME/.config/systemd/user/kvmc-share.service"
 
 SERVICE_PORT_DEFAULT=7532
@@ -102,6 +107,21 @@ run_priv_tee() {
 		printf >&2 '+ escreva o conteúdo abaixo em %s (como root):\n' "$dest"
 		cat >&2
 		confirm "arquivo $dest criado como root?" ||
+			die "escrita privilegiada não confirmada"
+	fi
+}
+
+# run_priv_tee_append ARQUIVO — acrescenta stdin (uma linha) a ARQUIVO (root)
+# via sudo tee -a. Mesmo padrão de run_priv_tee, mas sem truncar o arquivo.
+run_priv_tee_append() {
+	local dest="$1"
+	if command -v sudo >/dev/null 2>&1; then
+		printf >&2 '+ sudo tee -a %s\n' "$dest"
+		sudo tee -a "$dest" >/dev/null
+	else
+		printf >&2 '+ acrescente a linha abaixo em %s (como root):\n' "$dest"
+		cat >&2
+		confirm "linha adicionada em $dest como root?" ||
 			die "escrita privilegiada não confirmada"
 	fi
 }
@@ -342,18 +362,121 @@ _peer_list() {
 	' "$1"
 }
 
-# _list_capture_devices — ecoa "path<TAB>nome" para cada symlink de teclado/mouse
-# em /dev/input/by-id (override BYID_DIR). Nome resolvido via parse_input_devices.
-_list_capture_devices() {
-	local dir="${BYID_DIR:-/dev/input/by-id}" link ev name devmap
-	[ -d "$dir" ] || return 1
-	devmap="$(parse_input_devices || true)"
+# _classify_input_device EVENTNODE — ecoa "kbd"/"mouse" via tags ID_INPUT_*
+# do udev; vazio se não for nenhum dos dois (ou se udevadm falhar). Em teste,
+# UDEV_PROPS_DIR/$EVENTNODE substitui a chamada real a udevadm (evita tocar
+# em dispositivos reais).
+_classify_input_device() {
+	local ev="$1" props
+	if [ -n "${UDEV_PROPS_DIR:-}" ]; then
+		props="$(cat "$UDEV_PROPS_DIR/$ev" 2>/dev/null || true)"
+	else
+		props="$(udevadm info --query=property --name="/dev/input/$ev" 2>/dev/null)" || return 0
+	fi
+	if printf '%s\n' "$props" | grep -q '^ID_INPUT_KEYBOARD=1'; then
+		echo kbd
+	elif printf '%s\n' "$props" | grep -q '^ID_INPUT_MOUSE=1'; then
+		echo mouse
+	fi
+}
+
+# _byid_for_event EVENTNODE DIR — ecoa o symlink em DIR que aponta pra esse
+# eventN, se existir (falha se não achar nenhum).
+_byid_for_event() {
+	local ev="$1" dir="$2" link
 	for link in "$dir"/*-event-kbd "$dir"/*-event-mouse; do
 		[ -e "$link" ] || continue
-		ev="$(basename "$(readlink -f "$link")")"
-		name="$(printf '%s\n' "$devmap" | awk -F'\t' -v e="$ev" '$1 == e { print $2; exit }')"
-		printf '%s\t%s\n' "$link" "${name:-$ev}"
+		[ "$(basename "$(readlink -f "$link")")" = "$ev" ] && {
+			echo "$link"
+			return 0
+		}
 	done
+	return 1
+}
+
+# _list_capture_devices — ecoa "path<TAB>nome<TAB>kbd|mouse" para cada
+# teclado/mouse detectado via ID_INPUT_KEYBOARD/MOUSE do udev (não só os que
+# têm symlink em /dev/input/by-id — cobre Bluetooth e outros sem by-id
+# nativo). Prefere o symlink estável quando existe; cai pro /dev/input/eventN
+# cru quando não — select_devices trata esse caso via ensure_stable_device_path.
+_list_capture_devices() {
+	local dir="${BYID_DIR:-/dev/input/by-id}" devmap ev name kind path
+	devmap="$(parse_input_devices || true)"
+	[ -n "$devmap" ] || return 1
+	while IFS=$'\t' read -r ev name; do
+		[ -n "$ev" ] || continue
+		kind="$(_classify_input_device "$ev")"
+		[ -n "$kind" ] || continue
+		path="$(_byid_for_event "$ev" "$dir" || true)"
+		[ -n "$path" ] || path="/dev/input/$ev"
+		printf '%s\t%s\t%s\n' "$path" "${name:-$ev}" "$kind"
+	done <<<"$devmap"
+}
+
+# _stable_uniq_for DEV — ecoa o ATTRS{uniq} (MAC/serial) do dispositivo mais
+# próximo na árvore sysfs, se houver.
+_stable_uniq_for() {
+	local dev="$1"
+	udevadm info -a --name="$dev" 2>/dev/null |
+		grep -m1 'ATTRS{uniq}==' | sed -E 's/.*=="([^"]*)".*/\1/'
+}
+
+# _slugify NOME — normaliza pra usar em symlink/nome de arquivo (minúsculas,
+# só a-z0-9-, sem repetição/bordas de hífen).
+_slugify() {
+	printf '%s\n' "$1" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-' |
+		sed -E 's/-+/-/g; s/^-|-$//g'
+}
+
+# ensure_stable_device_path DEV NOME — se DEV já é um symlink em by-id, ecoa
+# sem mudar nada. Senão (ex: Bluetooth sem by-id nativo), tenta gerar uma
+# regra udev chaveada por ATTRS{uniq} em $PERIPHERALS_RULES_FILE e ecoa o novo
+# symlink persistente. Sem uniq disponível: avisa e ecoa o path original
+# (instável entre reconexões/reboots — limite conhecido, sem stable id).
+ensure_stable_device_path() {
+	local dev="$1" name="$2" uniq slug link_name line
+	case "$dev" in
+	*/by-id/*)
+		echo "$dev"
+		return 0
+		;;
+	esac
+
+	uniq="$(_stable_uniq_for "$dev")"
+	if [ -z "$uniq" ]; then
+		log_warn "$name sem identificador estável (ATTRS{uniq} vazio) — usando $dev direto; o número pode mudar após reconexão/reboot"
+		echo "$dev"
+		return 0
+	fi
+
+	slug="$(_slugify "$name")"
+	link_name="kvmc-${slug:-periferico}"
+	line="SUBSYSTEM==\"input\", ATTRS{uniq}==\"$uniq\", ENV{ID_INPUT}==\"1\", SYMLINK+=\"input/by-id/$link_name\""
+
+	if [ -e "$PERIPHERALS_RULES_FILE" ] && grep -qF "$uniq" "$PERIPHERALS_RULES_FILE"; then
+		log_ok "regra udev pra $name já existe em $PERIPHERALS_RULES_FILE"
+	else
+		log_info "gerando regra udev persistente pra $name (sem by-id nativo)"
+		printf '%s\n' "$line" | run_priv_tee_append "$PERIPHERALS_RULES_FILE"
+		run_priv udevadm control --reload-rules
+		run_priv udevadm trigger --action=add --subsystem-match=input
+	fi
+
+	echo "/dev/input/by-id/$link_name"
+}
+
+# validate_device_live DEV NOME [TIMEOUT=5] — pede pro usuário mexer/apertar
+# DEV e confirma recebimento real de bytes (não só permissão de leitura).
+# 0 se recebeu algo dentro do TIMEOUT, 1 caso contrário.
+validate_device_live() {
+	local dev="$1" name="$2" t="${3:-5}"
+	printf >&2 '  mexa/aperte "%s" agora (%ss)... ' "$name" "$t"
+	if timeout "$t" head -c 24 "$dev" >/dev/null 2>&1; then
+		printf >&2 'ok\n'
+		return 0
+	fi
+	printf >&2 'nada recebido\n'
+	return 1
 }
 
 # write_env DEVICES — grava KVMC_SHARE_DEVICES=... em $ENV_FILE (0600).
@@ -403,35 +526,35 @@ cmd_deps() {
 		log_warn "faça logout/login (ou reboot) antes de 'run' — o grupo 'input' só vale em sessão nova"
 	fi
 }
-# select_devices — menu de teclado/mouse, pré-seleção do 1º de cada, múltipla
-# escolha; valida leitura; persiste KVMC_SHARE_DEVICES.
+# select_devices — menu de teclado/mouse (inclui os sem by-id nativo,
+# ex: Bluetooth), pré-seleção do 1º de cada tipo, múltipla escolha; valida
+# permissão + captura ao vivo de cada um; resolve path estável (gerando regra
+# udev quando falta); persiste KVMC_SHARE_DEVICES.
 select_devices() {
-	local -a cand=() sel=()
+	local -a cand=() sel_path=() sel_name=()
 	mapfile -t cand < <(_list_capture_devices || true)
 
 	if [ "${#cand[@]}" -eq 0 ]; then
-		log_warn "nada em /dev/input/by-id/ — informe paths de /dev/input/event* à mão"
+		log_warn "nenhum teclado/mouse detectado via udev — informe paths de /dev/input/event* à mão"
 		local -a manual=()
 		read -r -p "paths (espaço-separados): " -a manual
-		sel=("${manual[@]}")
+		local m
+		for m in "${manual[@]}"; do
+			sel_path+=("$m")
+			sel_name+=("$m")
+		done
 	else
-		local i path name first_kbd="" first_mouse=""
+		local i path name kind first_kbd="" first_mouse=""
 		for i in "${!cand[@]}"; do
-			path="${cand[$i]%%$'\t'*}"
-			name="${cand[$i]#*$'\t'}"
-			printf '  [%d] %s\n      %s\n' "$((i + 1))" "$path" "$name"
-			case "$path" in
-			*-event-kbd) [ -z "$first_kbd" ] && first_kbd="$path" ;;
-			*-event-mouse) [ -z "$first_mouse" ] && first_mouse="$path" ;;
-			esac
+			IFS=$'\t' read -r path name kind <<<"${cand[$i]}"
+			printf '  [%d] %s\n      %s (%s)\n' "$((i + 1))" "$path" "$name" "$kind"
+			[ "$kind" = kbd ] && [ -z "$first_kbd" ] && first_kbd="$((i + 1))"
+			[ "$kind" = mouse ] && [ -z "$first_mouse" ] && first_mouse="$((i + 1))"
 		done
 
 		local -a def_idx=()
-		for i in "${!cand[@]}"; do
-			path="${cand[$i]%%$'\t'*}"
-			[ "$path" = "$first_kbd" ] && def_idx+=("$((i + 1))")
-			[ "$path" = "$first_mouse" ] && def_idx+=("$((i + 1))")
-		done
+		[ -n "$first_kbd" ] && def_idx+=("$first_kbd")
+		[ -n "$first_mouse" ] && def_idx+=("$first_mouse")
 
 		local reply
 		read -r -p "números a capturar (espaço-separados) [${def_idx[*]}]: " reply
@@ -441,17 +564,19 @@ select_devices() {
 		local n
 		for n in "${nums[@]}"; do
 			if [ "$n" -ge 1 ] 2>/dev/null && [ "$n" -le "${#cand[@]}" ]; then
-				sel+=("${cand[$((n - 1))]%%$'\t'*}")
+				IFS=$'\t' read -r path name kind <<<"${cand[$((n - 1))]}"
+				sel_path+=("$path")
+				sel_name+=("$name")
 			else
 				log_warn "índice inválido ignorado: $n"
 			fi
 		done
 	fi
 
-	[ "${#sel[@]}" -eq 0 ] && die "nenhum dispositivo selecionado"
+	[ "${#sel_path[@]}" -eq 0 ] && die "nenhum dispositivo selecionado"
 
 	local p bad=0
-	for p in "${sel[@]}"; do
+	for p in "${sel_path[@]}"; do
 		[ -r "$p" ] || {
 			log_warn "sem permissão de leitura: $p  (rode 'deps' e relogue)"
 			bad=1
@@ -459,8 +584,36 @@ select_devices() {
 	done
 	[ "$bad" -eq 1 ] && log_warn "prossigo; ajuste as permissões antes do 'run'"
 
+	# validação ao vivo, sequencial, uma por uma — bloqueia em falha e deixa
+	# tentar de novo ou remover da seleção, em vez de persistir um device errado.
+	local idx=0
+	while [ "$idx" -lt "${#sel_path[@]}" ]; do
+		p="${sel_path[$idx]}"
+		name="${sel_name[$idx]}"
+		if validate_device_live "$p" "$name"; then
+			idx=$((idx + 1))
+			continue
+		fi
+		log_warn "não recebi eventos de '$name' ($p)"
+		read -r -p "  [t]entar de novo / [r]emover da seleção: " ans
+		case "$ans" in
+		r | R)
+			sel_path=("${sel_path[@]:0:$idx}" "${sel_path[@]:$((idx + 1))}")
+			sel_name=("${sel_name[@]:0:$idx}" "${sel_name[@]:$((idx + 1))}")
+			;;
+		*) : ;; # tenta de novo no mesmo índice
+		esac
+	done
+
+	[ "${#sel_path[@]}" -eq 0 ] && die "nenhum dispositivo restou após a validação"
+
+	local -a resolved=()
+	for i in "${!sel_path[@]}"; do
+		resolved+=("$(ensure_stable_device_path "${sel_path[$i]}" "${sel_name[$i]}")")
+	done
+
 	local joined
-	joined="$(printf '%s:' "${sel[@]}")"
+	joined="$(printf '%s:' "${resolved[@]}")"
 	write_env "${joined%:}"
 }
 
@@ -865,6 +1018,14 @@ cmd_uninstall() {
 		log_ok "regra udev removida"
 	else
 		log_info "regra udev já ausente"
+	fi
+
+	if [ -e "$PERIPHERALS_RULES_FILE" ]; then
+		run_priv rm -f "$PERIPHERALS_RULES_FILE"
+		run_priv udevadm control --reload-rules
+		log_ok "regras de periféricos removidas"
+	else
+		log_info "regras de periféricos já ausentes"
 	fi
 
 	if [ -e "$CONF_DIR" ]; then

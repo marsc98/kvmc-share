@@ -228,6 +228,9 @@ fn spawn_dial_thread(
                 return;
             }
         };
+        if let Err(e) = stream.set_nodelay(true) {
+            eprintln!("[{}] falha ao desativar Nagle (TCP_NODELAY): {e:#}", peer.name);
+        }
         if let Err(e) = stream.set_read_timeout(Some(HANDSHAKE_AND_IDLE_READ_TIMEOUT)) {
             eprintln!(
                 "[{}] falha ao configurar timeout de leitura: {e:#}",
@@ -269,6 +272,9 @@ fn spawn_listener_thread(
                     continue;
                 }
             };
+            if let Err(e) = stream.set_nodelay(true) {
+                eprintln!("falha ao desativar Nagle (TCP_NODELAY): {e:#}");
+            }
             if let Err(e) = stream.set_read_timeout(Some(HANDSHAKE_AND_IDLE_READ_TIMEOUT)) {
                 eprintln!("falha ao configurar timeout de leitura: {e:#}");
                 continue;

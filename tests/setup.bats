@@ -291,31 +291,98 @@ TOML
 	[ "$status" -eq 1 ]
 }
 
+# --- _classify_input_device ----------------------------------------------
+
+# _udev_props_fixture — monta um UDEV_PROPS_DIR temporário: event3=kbd,
+# event4=mouse, event5=mouse (espelha proc-input-devices.txt). Ecoa o path.
+_udev_props_fixture() {
+	local d
+	d=$(mktemp -d)
+	printf 'ID_INPUT=1\nID_INPUT_KEYBOARD=1\n' >"$d/event3"
+	printf 'ID_INPUT=1\nID_INPUT_MOUSE=1\n' >"$d/event4"
+	printf 'ID_INPUT=1\nID_INPUT_MOUSE=1\n' >"$d/event5"
+	echo "$d"
+}
+
+@test "_classify_input_device: kbd via UDEV_PROPS_DIR" {
+	run bash -c '
+		source "$1"; d=$(mktemp -d)
+		printf "ID_INPUT_KEYBOARD=1\n" >"$d/event3"
+		UDEV_PROPS_DIR="$d" _classify_input_device event3
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[ "$output" = "kbd" ]
+}
+
+@test "_classify_input_device: mouse via UDEV_PROPS_DIR" {
+	run bash -c '
+		source "$1"; d=$(mktemp -d)
+		printf "ID_INPUT_MOUSE=1\n" >"$d/event8"
+		UDEV_PROPS_DIR="$d" _classify_input_device event8
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[ "$output" = "mouse" ]
+}
+
+@test "_classify_input_device: sem propriedades reconhecidas devolve vazio" {
+	run bash -c '
+		source "$1"; d=$(mktemp -d)
+		printf "ID_INPUT=1\n" >"$d/event9"
+		UDEV_PROPS_DIR="$d" _classify_input_device event9
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[ "$output" = "" ]
+}
+
+# --- _slugify --------------------------------------------------------------
+
+@test "_slugify: normaliza espaços, maiúsculas e símbolos" {
+	run bash -c 'source "$1"; _slugify "EM01 NL (Bluetooth)"' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[ "$output" = "em01-nl-bluetooth" ]
+}
+
 # --- _list_capture_devices ----------------------------------------------
 
-@test "_list_capture_devices: casa symlink by-id -> eventN -> nome" {
+@test "_list_capture_devices: casa symlink by-id -> eventN -> nome, com kind" {
 	run bash -c '
 		source "$1"
 		d=$(mktemp -d); mkdir "$d/by-id"
 		ln -s /dev/input/event3 "$d/by-id/usb-Foo_Kbd-event-kbd"
 		ln -s /dev/input/event4 "$d/by-id/usb-Bar_Mouse-event-mouse"
-		BYID_DIR="$d/by-id" DEVICES_FILE="$2" _list_capture_devices
-	' _ "$SETUP" "$FIXTURES/proc-input-devices.txt"
+		UDEV_PROPS_DIR="$3" BYID_DIR="$d/by-id" DEVICES_FILE="$2" _list_capture_devices
+	' _ "$SETUP" "$FIXTURES/proc-input-devices.txt" "$(_udev_props_fixture)"
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"usb-Foo_Kbd-event-kbd"*"AT Translated Set 2 keyboard"* ]]
-	[[ "$output" == *"usb-Bar_Mouse-event-mouse"*"Logitech USB Receiver Mouse"* ]]
+	[[ "$output" == *"usb-Foo_Kbd-event-kbd"*"AT Translated Set 2 keyboard"*"kbd"* ]]
+	[[ "$output" == *"usb-Bar_Mouse-event-mouse"*"Logitech USB Receiver Mouse"*"mouse"* ]]
 }
 
-@test "_list_capture_devices: diretório ausente retorna 1" {
-	run bash -c 'source "$1"; BYID_DIR=/no/such _list_capture_devices' _ "$SETUP"
-	[ "$status" -eq 1 ]
+@test "_list_capture_devices: diretório by-id ausente não bloqueia mais — cai pro eventN cru" {
+	run bash -c '
+		source "$1"
+		UDEV_PROPS_DIR="$3" BYID_DIR=/no/such DEVICES_FILE="$2" _list_capture_devices
+	' _ "$SETUP" "$FIXTURES/proc-input-devices.txt" "$(_udev_props_fixture)"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"/dev/input/event3"*"AT Translated Set 2 keyboard"*"kbd"* ]]
+	[[ "$output" == *"/dev/input/event4"*"Logitech USB Receiver Mouse"*"mouse"* ]]
 }
 
-@test "_list_capture_devices: sem symlinks casando devolve vazio, rc 0" {
+@test "_list_capture_devices: sem symlink by-id ainda aparece via classificação (caso Bluetooth)" {
 	run bash -c '
 		source "$1"
 		d=$(mktemp -d); mkdir "$d/by-id"
-		BYID_DIR="$d/by-id" DEVICES_FILE="$2" _list_capture_devices
+		UDEV_PROPS_DIR="$3" BYID_DIR="$d/by-id" DEVICES_FILE="$2" _list_capture_devices
+	' _ "$SETUP" "$FIXTURES/proc-input-devices.txt" "$(_udev_props_fixture)"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"/dev/input/event5"*"SynPS/2 Synaptics TouchPad"*"mouse"* ]]
+}
+
+@test "_list_capture_devices: sem classificação disponível devolve vazio, rc 0" {
+	run bash -c '
+		source "$1"
+		d=$(mktemp -d); mkdir "$d/by-id"
+		e=$(mktemp -d)
+		UDEV_PROPS_DIR="$e" BYID_DIR="$d/by-id" DEVICES_FILE="$2" _list_capture_devices
 	' _ "$SETUP" "$FIXTURES/proc-input-devices.txt"
 	[ "$status" -eq 0 ]
 	[ "$output" = "" ]
