@@ -213,6 +213,62 @@ fn cmd_peer_add(mut args: Vec<String>) -> Result<()> {
     Ok(())
 }
 
+/// Aplica os campos informados (`Some`) a um peer existente, preservando os
+/// demais (pura, sem tocar disco).
+fn apply_peer_edit(
+    peers: &mut [PeerConfig],
+    name: &str,
+    addr: Option<SocketAddr>,
+    direction: Option<Direction>,
+) -> Result<()> {
+    let peer = peers
+        .iter_mut()
+        .find(|p| p.name == name)
+        .with_context(|| format!("peer '{name}' não encontrado"))?;
+    if let Some(addr) = addr {
+        peer.addr = addr;
+    }
+    if let Some(direction) = direction {
+        peer.direction = direction;
+    }
+    Ok(())
+}
+
+/// `kvmc-share peer edit <nome> [--addr ...] [--direction ...]`. Sem flags,
+/// mostra os valores atuais e sai sem escrever.
+fn cmd_peer_edit(mut args: Vec<String>) -> Result<()> {
+    let addr_flag = take_flag(&mut args, "--addr");
+    let direction_flag = take_flag(&mut args, "--direction");
+    let name = args
+        .into_iter()
+        .next()
+        .context("uso: kvmc-share peer edit <nome> [--addr ...] [--direction ...]")?;
+
+    let (local, mut peers) = kvmc_share::config::load()?;
+
+    if addr_flag.is_none() && direction_flag.is_none() {
+        let peer = peers
+            .iter()
+            .find(|p| p.name == name)
+            .with_context(|| format!("peer '{name}' não encontrado"))?;
+        println!("{}\t{}\t{}", peer.name, peer.addr, peer.direction);
+        return Ok(());
+    }
+
+    let addr = addr_flag
+        .map(|a| a.parse::<SocketAddr>())
+        .transpose()
+        .context("--addr inválido")?;
+    let direction = direction_flag.map(|d| d.parse::<Direction>()).transpose()?;
+
+    apply_peer_edit(&mut peers, &name, addr, direction)?;
+    kvmc_share::config::save(&default_path()?, &local, &peers)?;
+    println!(
+        "peer '{name}' atualizado — reinicie o daemon (systemctl --user restart kvmc-share) pra aplicar"
+    );
+    Ok(())
+}
+
 fn run() -> Result<()> {
     let (local, peers) = kvmc_share::config::load()?;
     let psks: HashMap<String, [u8; 32]> = peers
@@ -661,5 +717,47 @@ mod tests {
         let err = add_peer_to_list(&mut peers, dup).unwrap_err();
         assert!(err.to_string().contains("já cadastrado"));
         assert_eq!(peers.len(), 1);
+    }
+
+    fn sample_peer(name: &str) -> PeerConfig {
+        PeerConfig {
+            name: name.into(),
+            addr: "192.168.1.50:7532".parse().unwrap(),
+            psk_path: PathBuf::from("/dev/null"),
+            direction: kvmc_share::config::Direction::Right,
+        }
+    }
+
+    #[test]
+    fn apply_peer_edit_addr_only_preserves_direction_and_psk_path() {
+        let mut peers = vec![sample_peer("laptop")];
+        let new_addr: SocketAddr = "10.0.0.9:9999".parse().unwrap();
+        apply_peer_edit(&mut peers, "laptop", Some(new_addr), None).unwrap();
+        assert_eq!(peers[0].addr, new_addr);
+        assert_eq!(peers[0].direction, kvmc_share::config::Direction::Right);
+        assert_eq!(peers[0].psk_path, PathBuf::from("/dev/null"));
+    }
+
+    #[test]
+    fn apply_peer_edit_direction_only_preserves_addr() {
+        let mut peers = vec![sample_peer("laptop")];
+        let original_addr = peers[0].addr;
+        apply_peer_edit(
+            &mut peers,
+            "laptop",
+            None,
+            Some(kvmc_share::config::Direction::Left),
+        )
+        .unwrap();
+        assert_eq!(peers[0].addr, original_addr);
+        assert_eq!(peers[0].direction, kvmc_share::config::Direction::Left);
+    }
+
+    #[test]
+    fn apply_peer_edit_unknown_name_fails_without_mutating() {
+        let mut peers = vec![sample_peer("laptop")];
+        let err = apply_peer_edit(&mut peers, "ghost", None, None).unwrap_err();
+        assert!(err.to_string().contains("não encontrado"));
+        assert_eq!(peers[0], sample_peer("laptop"));
     }
 }
