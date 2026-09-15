@@ -31,6 +31,20 @@ pub enum Direction {
     Down,
 }
 
+impl std::str::FromStr for Direction {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        match s {
+            "left" => Ok(Direction::Left),
+            "right" => Ok(Direction::Right),
+            "up" => Ok(Direction::Up),
+            "down" => Ok(Direction::Down),
+            other => bail!("direção inválida: '{other}' (esperado left, right, up ou down)"),
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct RawConfig {
     local: LocalConfig,
@@ -86,13 +100,36 @@ fn parse_and_validate(toml_str: &str) -> Result<(LocalConfig, Vec<PeerConfig>)> 
     Ok((raw.local, peers))
 }
 
+/// Retorna `~/.config/kvmc-share/peers.toml` resolvido.
+pub fn default_path() -> Result<PathBuf> {
+    let home = std::env::var("HOME").context("variável de ambiente HOME não definida")?;
+    Ok(PathBuf::from(home).join(".config/kvmc-share/peers.toml"))
+}
+
 /// Lê e valida `~/.config/kvmc-share/peers.toml`.
 pub fn load() -> Result<(LocalConfig, Vec<PeerConfig>)> {
-    let home = std::env::var("HOME").context("variável de ambiente HOME não definida")?;
-    let path = PathBuf::from(home).join(".config/kvmc-share/peers.toml");
+    let path = default_path()?;
     let toml_str = std::fs::read_to_string(&path)
         .with_context(|| format!("falha ao ler {}", path.display()))?;
     parse_and_validate(&toml_str)
+}
+
+/// Inverso de `expand_home`: se `path` está sob `$HOME`, devolve a notação
+/// `~/...`; caso contrário devolve o path absoluto como está.
+pub fn contract_home(path: &Path) -> String {
+    let Ok(home) = std::env::var("HOME") else {
+        return path.display().to_string();
+    };
+    match path.strip_prefix(&home) {
+        Ok(rest) => PathBuf::from("~").join(rest).display().to_string(),
+        Err(_) => path.display().to_string(),
+    }
+}
+
+/// Path convencional da PSK de um peer: `~/.config/kvmc-share/peers/<peer_name>.psk` —
+/// mesma lógica hoje inline em `keygen()` (`kvmc-share.rs:80`).
+pub fn default_psk_path(peer_name: &str) -> PathBuf {
+    PathBuf::from(".config/kvmc-share/peers").join(format!("{peer_name}.psk"))
 }
 
 #[cfg(test)]
@@ -171,5 +208,61 @@ direction = "right"
 "#;
         let err = parse_and_validate(toml_str).unwrap_err();
         assert!(err.to_string().contains("psk_path"));
+    }
+
+    #[test]
+    fn contract_home_replaces_home_prefix_with_tilde() {
+        // SAFETY: teste single-threaded pra variável de ambiente; sem concorrência com outros testes que leem HOME.
+        unsafe { std::env::set_var("HOME", "/home/marco") };
+        let path = Path::new("/home/marco/.config/kvmc-share/peers/laptop.psk");
+        assert_eq!(
+            contract_home(path),
+            "~/.config/kvmc-share/peers/laptop.psk"
+        );
+    }
+
+    #[test]
+    fn contract_home_keeps_paths_outside_home_absolute() {
+        unsafe { std::env::set_var("HOME", "/home/marco") };
+        let path = Path::new("/etc/kvmc-share/peers/laptop.psk");
+        assert_eq!(
+            contract_home(path),
+            "/etc/kvmc-share/peers/laptop.psk"
+        );
+    }
+
+    #[test]
+    fn default_psk_path_matches_keygen_convention() {
+        assert_eq!(
+            default_psk_path("laptop"),
+            PathBuf::from(".config/kvmc-share/peers/laptop.psk")
+        );
+    }
+
+    #[test]
+    fn direction_from_str_accepts_all_four_values() {
+        assert_eq!("left".parse::<Direction>().unwrap(), Direction::Left);
+        assert_eq!("right".parse::<Direction>().unwrap(), Direction::Right);
+        assert_eq!("up".parse::<Direction>().unwrap(), Direction::Up);
+        assert_eq!("down".parse::<Direction>().unwrap(), Direction::Down);
+    }
+
+    #[test]
+    fn direction_from_str_rejects_invalid_value_with_clear_message() {
+        let err = "diagonal".parse::<Direction>().unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("left"));
+        assert!(msg.contains("right"));
+        assert!(msg.contains("up"));
+        assert!(msg.contains("down"));
+    }
+
+    #[test]
+    fn default_path_resolves_under_home() {
+        unsafe { std::env::set_var("HOME", "/home/marco") };
+        assert_eq!(
+            default_path().unwrap(),
+            PathBuf::from("/home/marco/.config/kvmc-share/peers.toml")
+        );
     }
 }
