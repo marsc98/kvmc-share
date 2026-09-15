@@ -8,7 +8,7 @@
 use anyhow::{Context, Result, bail};
 use evdev::uinput::VirtualDevice;
 use evdev::{EventType, InputEvent};
-use kvmc_share::config::{Direction, PeerConfig, default_path, default_psk_path, expand_home};
+use kvmc_share::config::{Direction, LocalConfig, PeerConfig, default_path, default_psk_path, expand_home};
 use kvmc_share::focus::{Focus, FocusState, LocalInjector, PeerId, PeerSender};
 use kvmc_share::noise::{EncryptedChannel, handshake_as_initiator, handshake_as_responder};
 use kvmc_share::wire::{self, WireMessage};
@@ -315,6 +315,61 @@ fn cmd_peer_rm(mut args: Vec<String>) -> Result<()> {
     remove_psk_file(&removed.psk_path)?;
     println!(
         "peer '{name}' removido — reinicie o daemon (systemctl --user restart kvmc-share) pra aplicar"
+    );
+    Ok(())
+}
+
+/// Aplica os campos informados (`Some`) a `local`, preservando os demais
+/// (pura, sem tocar disco).
+fn apply_local_edit(
+    local: &mut LocalConfig,
+    name: Option<String>,
+    width: Option<u32>,
+    height: Option<u32>,
+    listen: Option<String>,
+) {
+    if let Some(name) = name {
+        local.name = name;
+    }
+    if let Some(width) = width {
+        local.width = width;
+    }
+    if let Some(height) = height {
+        local.height = height;
+    }
+    if let Some(listen) = listen {
+        local.listen = listen;
+    }
+}
+
+/// `kvmc-share local edit [--name ...] [--width ...] [--height ...] [--listen ...]`.
+/// Sem flags, mostra os valores atuais e sai sem escrever.
+fn cmd_local_edit(mut args: Vec<String>) -> Result<()> {
+    let name = take_flag(&mut args, "--name");
+    let width = take_flag(&mut args, "--width")
+        .map(|w| w.parse::<u32>())
+        .transpose()
+        .context("--width inválido")?;
+    let height = take_flag(&mut args, "--height")
+        .map(|h| h.parse::<u32>())
+        .transpose()
+        .context("--height inválido")?;
+    let listen = take_flag(&mut args, "--listen");
+
+    let (mut local, peers) = kvmc_share::config::load()?;
+
+    if name.is_none() && width.is_none() && height.is_none() && listen.is_none() {
+        println!(
+            "{}\t{}x{}\t{}",
+            local.name, local.width, local.height, local.listen
+        );
+        return Ok(());
+    }
+
+    apply_local_edit(&mut local, name, width, height, listen);
+    kvmc_share::config::save(&default_path()?, &local, &peers)?;
+    println!(
+        "config local atualizada — reinicie o daemon (systemctl --user restart kvmc-share) pra aplicar"
     );
     Ok(())
 }
@@ -841,5 +896,47 @@ mod tests {
         let path = std::env::temp_dir().join("kvmc-share-test-rm-psk-missing.psk");
         std::fs::remove_file(&path).ok();
         remove_psk_file(&path).unwrap();
+    }
+
+    fn sample_local() -> LocalConfig {
+        LocalConfig {
+            name: "desktop".into(),
+            width: 1920,
+            height: 1080,
+            listen: "0.0.0.0:7532".into(),
+        }
+    }
+
+    #[test]
+    fn apply_local_edit_no_flags_leaves_unchanged() {
+        let mut local = sample_local();
+        apply_local_edit(&mut local, None, None, None, None);
+        assert_eq!(local, sample_local());
+    }
+
+    #[test]
+    fn apply_local_edit_partial_flags_update_only_those_fields() {
+        let mut local = sample_local();
+        apply_local_edit(&mut local, None, Some(2560), Some(1440), None);
+        assert_eq!(local.name, "desktop");
+        assert_eq!(local.width, 2560);
+        assert_eq!(local.height, 1440);
+        assert_eq!(local.listen, "0.0.0.0:7532");
+    }
+
+    #[test]
+    fn apply_local_edit_all_flags_update_everything() {
+        let mut local = sample_local();
+        apply_local_edit(
+            &mut local,
+            Some("laptop".into()),
+            Some(1280),
+            Some(720),
+            Some("0.0.0.0:9999".into()),
+        );
+        assert_eq!(local.name, "laptop");
+        assert_eq!(local.width, 1280);
+        assert_eq!(local.height, 720);
+        assert_eq!(local.listen, "0.0.0.0:9999");
     }
 }
