@@ -183,6 +183,80 @@ call() {
 	[[ "$output" == *"rode de dentro do repo ou defina KVMC_BIN"* ]]
 }
 
+# --- ensure_global_cli -----------------------------------------------------
+
+@test "ensure_global_cli: já atualizado (mesmo conteúdo) não pergunta nem copia" {
+	run bash -c '
+		source "$1"
+		confirm() { echo "NAO ERA PRA CHAMAR CONFIRM" >&2; return 1; }
+		d=$(mktemp -d)
+		bin="$d/bin/kvmc-share"; mkdir -p "$(dirname "$bin")"; printf "conteudo" > "$bin"; chmod +x "$bin"
+		CARGO_BIN_DIR="$d/cargo-bin"; mkdir -p "$CARGO_BIN_DIR"
+		cp "$bin" "$CARGO_BIN_DIR/kvmc-share"
+		ensure_global_cli "$bin"
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"já atualizado"* ]]
+}
+
+@test "ensure_global_cli: ausente + confirmado copia pro CARGO_BIN_DIR" {
+	run bash -c '
+		source "$1"
+		confirm() { return 0; }
+		d=$(mktemp -d)
+		bin="$d/bin/kvmc-share"; mkdir -p "$(dirname "$bin")"; printf "conteudo" > "$bin"; chmod +x "$bin"
+		CARGO_BIN_DIR="$d/cargo-bin"
+		ensure_global_cli "$bin"
+		[ -e "$CARGO_BIN_DIR/kvmc-share" ] && echo "copiado"
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"copiado"* ]]
+}
+
+@test "ensure_global_cli: ausente + recusado não copia" {
+	run bash -c '
+		source "$1"
+		confirm() { return 1; }
+		d=$(mktemp -d)
+		bin="$d/bin/kvmc-share"; mkdir -p "$(dirname "$bin")"; printf "conteudo" > "$bin"; chmod +x "$bin"
+		CARGO_BIN_DIR="$d/cargo-bin"
+		ensure_global_cli "$bin"
+		[ -e "$CARGO_BIN_DIR/kvmc-share" ] && echo "copiado" || echo "nao copiado"
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"nao copiado"* ]]
+}
+
+@test "ensure_global_cli: desatualizado + confirmado atualiza" {
+	run bash -c '
+		source "$1"
+		confirm() { return 0; }
+		d=$(mktemp -d)
+		bin="$d/bin/kvmc-share"; mkdir -p "$(dirname "$bin")"; printf "novo" > "$bin"; chmod +x "$bin"
+		CARGO_BIN_DIR="$d/cargo-bin"; mkdir -p "$CARGO_BIN_DIR"
+		printf "velho" > "$CARGO_BIN_DIR/kvmc-share"; chmod +x "$CARGO_BIN_DIR/kvmc-share"
+		ensure_global_cli "$bin"
+		cat "$CARGO_BIN_DIR/kvmc-share"
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"novo"* ]]
+}
+
+@test "ensure_global_cli: desatualizado + recusado mantém o antigo" {
+	run bash -c '
+		source "$1"
+		confirm() { return 1; }
+		d=$(mktemp -d)
+		bin="$d/bin/kvmc-share"; mkdir -p "$(dirname "$bin")"; printf "novo" > "$bin"; chmod +x "$bin"
+		CARGO_BIN_DIR="$d/cargo-bin"; mkdir -p "$CARGO_BIN_DIR"
+		printf "velho" > "$CARGO_BIN_DIR/kvmc-share"; chmod +x "$CARGO_BIN_DIR/kvmc-share"
+		ensure_global_cli "$bin"
+		cat "$CARGO_BIN_DIR/kvmc-share"
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"velho"* ]]
+}
+
 # --- detect_resolution / _res_grep ---------------------------------------
 
 @test "_res_grep: extrai WxH da linha (current) do cosmic-randr (com ANSI)" {

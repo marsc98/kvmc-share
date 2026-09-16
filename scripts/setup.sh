@@ -489,6 +489,46 @@ write_env() {
 
 # --- Subcomandos (stubs — preenchidos nas próximas tasks) --------------------
 
+# ensure_global_cli BIN — verifica se 'kvmc-share' está disponível
+# globalmente (achável sem `./target/release/...` ou `KVMC_BIN=`) e, se não
+# estiver (ou estiver desatualizado em relação a BIN), pergunta antes de
+# copiar pra CARGO_BIN_DIR (default ~/.cargo/bin — já no PATH em instalações
+# padrão do rustup). Em teste, CARGO_BIN_DIR restringe a busca a esse dir,
+# ignorando o PATH real (evita pegar um kvmc-share já instalado na máquina).
+ensure_global_cli() {
+	local bin="$1" cargo_bin_dir="${CARGO_BIN_DIR:-$HOME/.cargo/bin}" target lookup=""
+	target="$cargo_bin_dir/kvmc-share"
+
+	if [ -n "${CARGO_BIN_DIR:-}" ]; then
+		[ -x "$target" ] && lookup="$target"
+	else
+		lookup="$(command -v kvmc-share 2>/dev/null || true)"
+	fi
+
+	if [ -n "$lookup" ] && cmp -s "$lookup" "$bin" 2>/dev/null; then
+		log_ok "kvmc-share global já atualizado ($lookup)"
+		return 0
+	fi
+
+	if [ -n "$lookup" ]; then
+		confirm "kvmc-share global em $lookup parece desatualizado — atualizar?" ||
+			{
+				log_info "mantendo $lookup como está"
+				return 0
+			}
+	else
+		confirm "kvmc-share não está disponível globalmente — copiar pra $target?" ||
+			{
+				log_info "kvmc-share só disponível via $bin"
+				return 0
+			}
+	fi
+
+	mkdir -p "$cargo_bin_dir"
+	cp "$bin" "$target"
+	log_ok "kvmc-share instalado em $target"
+}
+
 cmd_deps() {
 	local relogar=0
 
@@ -521,6 +561,7 @@ cmd_deps() {
 	# --- binário ---
 	need_bin
 	log_ok "binário: $BIN"
+	ensure_global_cli "$BIN"
 
 	if [ "$relogar" -eq 1 ]; then
 		log_warn "faça logout/login (ou reboot) antes de 'run' — o grupo 'input' só vale em sessão nova"
