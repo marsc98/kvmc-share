@@ -49,6 +49,10 @@ fn main() -> Result<()> {
     }
 
     match args.remove(0).as_str() {
+        "-h" | "-help" | "--help" | "help" => {
+            println!("{USAGE}");
+            Ok(())
+        }
         "run" => run(args),
         "keygen" => keygen(args),
         "peer" => {
