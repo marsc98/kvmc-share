@@ -110,6 +110,7 @@ fn keygen(args: Vec<String>) -> Result<()> {
     let [peer_name, host] = args.as_slice() else {
         bail!("uso: kvmc-share keygen <peer-name> <ip>");
     };
+    kvmc_share::config::validate_peer_name(peer_name)?;
 
     let relative_path = PathBuf::from(".config/kvmc-share/peers").join(format!("{peer_name}.psk"));
     let path = expand_home(&Path::new("~").join(&relative_path))?;
@@ -203,13 +204,14 @@ fn build_new_peer(
     direction: &str,
     psk_path_override: Option<PathBuf>,
 ) -> Result<PeerConfig> {
+    kvmc_share::config::validate_peer_name(name)?;
     let addr: SocketAddr = addr
         .parse()
         .with_context(|| format!("--addr inválido: '{addr}'"))?;
     let direction: Direction = direction.parse()?;
     let psk_path = match psk_path_override {
         Some(p) => p,
-        None => expand_home(&Path::new("~").join(default_psk_path(name)))?,
+        None => expand_home(&Path::new("~").join(default_psk_path(name)?))?,
     };
     Ok(PeerConfig {
         name: name.to_string(),
@@ -837,13 +839,13 @@ mod tests {
 
     #[test]
     fn build_new_peer_derives_psk_path_by_convention() {
-        unsafe { std::env::set_var("HOME", "/home/marco") };
+        unsafe { std::env::set_var("HOME", "/home/testuser") };
         let peer = build_new_peer("laptop", "192.168.1.50:7532", "right", None).unwrap();
         assert_eq!(peer.name, "laptop");
         assert_eq!(peer.direction, kvmc_share::config::Direction::Right);
         assert_eq!(
             peer.psk_path,
-            PathBuf::from("/home/marco/.config/kvmc-share/peers/laptop.psk")
+            PathBuf::from("/home/testuser/.config/kvmc-share/peers/laptop.psk")
         );
     }
 
@@ -869,6 +871,23 @@ mod tests {
     fn build_new_peer_rejects_malformed_addr() {
         let err = build_new_peer("laptop", "not-an-addr", "right", None).unwrap_err();
         assert!(err.to_string().contains("--addr inválido"));
+    }
+
+    #[test]
+    fn build_new_peer_rejects_path_traversal_in_name_even_with_override() {
+        let err = build_new_peer("../../etc/passwd", "192.168.1.50:7532", "right", None)
+            .unwrap_err();
+        assert!(err.to_string().contains("nome de peer inválido"));
+
+        // mesmo com --psk-path informado, o nome ainda vai pro peers.toml sem escaping — bloqueia igual.
+        let err = build_new_peer(
+            "../../etc/passwd",
+            "192.168.1.50:7532",
+            "right",
+            Some(PathBuf::from("/custom/path.psk")),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("nome de peer inválido"));
     }
 
     #[test]

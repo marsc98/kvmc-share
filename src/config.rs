@@ -143,10 +143,29 @@ pub fn contract_home(path: &Path) -> String {
     }
 }
 
+/// Valida que `name` é seguro pra usar como componente de path e como
+/// string TOML sem escaping (só `[A-Za-z0-9_-]`, não vazio) — bloqueia
+/// path traversal (`..`, `/`) e quebra de TOML via aspas no nome do peer.
+pub fn validate_peer_name(name: &str) -> Result<()> {
+    if name.is_empty() {
+        bail!("nome de peer não pode ser vazio");
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        bail!(
+            "nome de peer inválido: '{name}' (use só letras, números, '-' e '_')"
+        );
+    }
+    Ok(())
+}
+
 /// Path convencional da PSK de um peer: `~/.config/kvmc-share/peers/<peer_name>.psk` —
 /// mesma lógica hoje inline em `keygen()` (`kvmc-share.rs:80`).
-pub fn default_psk_path(peer_name: &str) -> PathBuf {
-    PathBuf::from(".config/kvmc-share/peers").join(format!("{peer_name}.psk"))
+pub fn default_psk_path(peer_name: &str) -> Result<PathBuf> {
+    validate_peer_name(peer_name)?;
+    Ok(PathBuf::from(".config/kvmc-share/peers").join(format!("{peer_name}.psk")))
 }
 
 /// Regenera `peers.toml` inteiro a partir de `local`/`peers` (mesmo formato
@@ -255,8 +274,8 @@ direction = "right"
     #[test]
     fn contract_home_replaces_home_prefix_with_tilde() {
         // SAFETY: teste single-threaded pra variável de ambiente; sem concorrência com outros testes que leem HOME.
-        unsafe { std::env::set_var("HOME", "/home/marco") };
-        let path = Path::new("/home/marco/.config/kvmc-share/peers/laptop.psk");
+        unsafe { std::env::set_var("HOME", "/home/testuser") };
+        let path = Path::new("/home/testuser/.config/kvmc-share/peers/laptop.psk");
         assert_eq!(
             contract_home(path),
             "~/.config/kvmc-share/peers/laptop.psk"
@@ -265,7 +284,7 @@ direction = "right"
 
     #[test]
     fn contract_home_keeps_paths_outside_home_absolute() {
-        unsafe { std::env::set_var("HOME", "/home/marco") };
+        unsafe { std::env::set_var("HOME", "/home/testuser") };
         let path = Path::new("/etc/kvmc-share/peers/laptop.psk");
         assert_eq!(
             contract_home(path),
@@ -276,9 +295,30 @@ direction = "right"
     #[test]
     fn default_psk_path_matches_keygen_convention() {
         assert_eq!(
-            default_psk_path("laptop"),
+            default_psk_path("laptop").unwrap(),
             PathBuf::from(".config/kvmc-share/peers/laptop.psk")
         );
+    }
+
+    #[test]
+    fn default_psk_path_rejects_path_traversal() {
+        assert!(default_psk_path("../../etc/passwd").is_err());
+        assert!(default_psk_path("..").is_err());
+        assert!(default_psk_path("a/b").is_err());
+    }
+
+    #[test]
+    fn validate_peer_name_accepts_alphanumeric_hyphen_underscore() {
+        assert!(validate_peer_name("laptop-2_prod").is_ok());
+    }
+
+    #[test]
+    fn validate_peer_name_rejects_empty_and_unsafe_chars() {
+        assert!(validate_peer_name("").is_err());
+        assert!(validate_peer_name("../etc/passwd").is_err());
+        assert!(validate_peer_name("foo/bar").is_err());
+        assert!(validate_peer_name("foo\"bar").is_err());
+        assert!(validate_peer_name("foo bar").is_err());
     }
 
     #[test]
@@ -301,10 +341,10 @@ direction = "right"
 
     #[test]
     fn default_path_resolves_under_home() {
-        unsafe { std::env::set_var("HOME", "/home/marco") };
+        unsafe { std::env::set_var("HOME", "/home/testuser") };
         assert_eq!(
             default_path().unwrap(),
-            PathBuf::from("/home/marco/.config/kvmc-share/peers.toml")
+            PathBuf::from("/home/testuser/.config/kvmc-share/peers.toml")
         );
     }
 
@@ -372,7 +412,7 @@ direction = "right"
 
     #[test]
     fn save_writes_psk_path_with_tilde_notation_under_home() {
-        unsafe { std::env::set_var("HOME", "/home/marco") };
+        unsafe { std::env::set_var("HOME", "/home/testuser") };
         let dir = std::env::temp_dir().join("kvmc-share-test-save-tilde");
         std::fs::create_dir_all(&dir).unwrap();
 
@@ -385,7 +425,7 @@ direction = "right"
         let peers = vec![PeerConfig {
             name: "laptop".into(),
             addr: "192.168.1.50:7532".parse().unwrap(),
-            psk_path: PathBuf::from("/home/marco/.config/kvmc-share/peers/laptop.psk"),
+            psk_path: PathBuf::from("/home/testuser/.config/kvmc-share/peers/laptop.psk"),
             direction: Direction::Right,
         }];
 
