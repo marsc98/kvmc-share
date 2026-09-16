@@ -527,6 +527,13 @@ ensure_global_cli() {
 	mkdir -p "$cargo_bin_dir"
 	cp "$bin" "$target"
 	log_ok "kvmc-share instalado em $target"
+
+	case ":$PATH:" in
+	*":$cargo_bin_dir:"*) ;;
+	*)
+		log_warn "$cargo_bin_dir não está no \$PATH — 'kvmc-share' não vai ser achado até você adicionar (ex: 'export PATH=\"\$HOME/.cargo/bin:\$PATH\"' no seu .bashrc/.zshrc)"
+		;;
+	esac
 }
 
 cmd_deps() {

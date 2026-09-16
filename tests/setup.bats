@@ -213,6 +213,34 @@ call() {
 	[[ "$output" == *"copiado"* ]]
 }
 
+@test "ensure_global_cli: copia mas CARGO_BIN_DIR fora do PATH avisa" {
+	run bash -c '
+		source "$1"
+		confirm() { return 0; }
+		d=$(mktemp -d)
+		bin="$d/bin/kvmc-share"; mkdir -p "$(dirname "$bin")"; printf "conteudo" > "$bin"; chmod +x "$bin"
+		CARGO_BIN_DIR="$d/cargo-bin-fora-do-path"
+		PATH="/usr/bin:/bin"
+		ensure_global_cli "$bin"
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"não está no \$PATH"* ]]
+}
+
+@test "ensure_global_cli: copia com CARGO_BIN_DIR já no PATH não avisa" {
+	run bash -c '
+		source "$1"
+		confirm() { return 0; }
+		d=$(mktemp -d)
+		bin="$d/bin/kvmc-share"; mkdir -p "$(dirname "$bin")"; printf "conteudo" > "$bin"; chmod +x "$bin"
+		CARGO_BIN_DIR="$d/cargo-bin-no-path"
+		PATH="$CARGO_BIN_DIR:/usr/bin:/bin"
+		ensure_global_cli "$bin"
+	' _ "$SETUP"
+	[ "$status" -eq 0 ]
+	[[ "$output" != *"não está no \$PATH"* ]]
+}
+
 @test "ensure_global_cli: ausente + recusado não copia" {
 	run bash -c '
 		source "$1"
