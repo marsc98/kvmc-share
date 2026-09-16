@@ -937,6 +937,25 @@ EOS
 	[[ "$output" == *"ORDER: config keygen"* ]]
 }
 
+@test "cmd_wizard: ensure_global_cli roda mesmo com 'deps' pulado" {
+	run bash -c '
+		source "$1"
+		order=""
+		cmd_deps() { order="$order deps"; }
+		cmd_config() { order="$order config"; }
+		cmd_keygen() { order="$order keygen"; }
+		_deps_done() { return 0; }
+		_config_done() { return 1; }
+		_keygen_done() { return 1; }
+		confirm() { return 1; }
+		need_bin() { order="$order need_bin"; BIN=/fake/bin; }
+		ensure_global_cli() { order="$order ensure_global_cli:$1"; }
+		cmd_wizard 2>/dev/null <<<"n"
+		echo "ORDER:$order"
+	' _ "$SETUP"
+	[[ "$output" == *"ORDER: need_bin ensure_global_cli:/fake/bin config keygen"* ]]
+}
+
 @test "cmd_wizard: falha em etapa obrigatória interrompe o wizard" {
 	run bash -c '
 		source "$1"

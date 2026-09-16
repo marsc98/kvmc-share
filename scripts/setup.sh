@@ -1123,6 +1123,12 @@ cmd_wizard() {
 	log_info "kvmc-share — assistente de configuração"
 
 	_wizard_step deps "grupo input, regra udev, binário" _deps_done
+	# ensure_global_cli roda sempre, mesmo quando 'deps' é pulado por já estar
+	# pronto (_deps_done não checa instalação global — não pode, senão o
+	# wizard nunca mais consideraria 'deps' pronto depois de uma recusa) —
+	# senão quem já tinha deps ok antes desta feature nunca via a oferta.
+	need_bin
+	ensure_global_cli "$BIN"
 	_wizard_step config "dispositivos + peers.toml" _config_done
 	_wizard_step keygen "PSK dos pares" _keygen_done
 
